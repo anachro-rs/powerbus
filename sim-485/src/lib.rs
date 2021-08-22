@@ -1,5 +1,7 @@
 #![allow(unused_imports, dead_code)]
 
+pub mod groundhog_sim;
+
 use std::{
     num::NonZeroU8,
     sync::{
