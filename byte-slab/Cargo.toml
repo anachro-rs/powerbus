@@ -7,3 +7,13 @@ edition = "2018"
 
 [dependencies]
 heapless = "0.7.5"
+
+[dependencies.serde]
+version = "1.0.128"
+optional = true
+default-features = false
+
+[features]
+# Enables the use of >= 254 elements in the slab
+usize_queue = ["heapless/mpmc_large"]
+default = ["usize_queue"]

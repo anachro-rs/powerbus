@@ -100,6 +100,10 @@ impl<const N: usize, const SZ: usize> SlabBox<N, SZ> {
 
         new_arc
     }
+
+    pub fn slab(&self) -> &'static BSlab<N, SZ> {
+        self.slab
+    }
 }
 
 // ------ SLAB ARC
@@ -122,6 +126,10 @@ impl<const N: usize, const SZ: usize> SlabArc<N, SZ> {
         } else {
             Err(())
         }
+    }
+
+    pub fn slab(&self) -> &'static BSlab<N, SZ> {
+        self.slab
     }
 }
 
@@ -198,6 +206,10 @@ impl<const N: usize, const SZ: usize> SlabSliceArc<N, SZ> {
         } else {
             Err(())
         }
+    }
+
+    pub fn slab(&self) -> &'static BSlab<N, SZ> {
+        self.arc.slab()
     }
 }
 
