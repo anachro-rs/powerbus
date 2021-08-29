@@ -9,7 +9,7 @@ pub mod discover {
     use groundhog::RollingTimer;
     use rand::Rng;
 
-    use crate::async_sleep_millis;
+    use crate::{async_sleep_micros, icd::BusSubMessage};
 
     use super::{AsyncSubMutex, SubInterface};
 
@@ -40,11 +40,9 @@ pub mod discover {
         }
 
         pub async fn obtain_addr(&mut self) -> Result<u8, ()> {
-            let timer = R::default();
             loop {
-                async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
-
-                if let Some(addr) = self.poll_inner().await? {
+                println!("OA!");
+                if let Some(addr) = self.obtain_addr_inner().await? {
                     println!("Addr obtained! {}", addr);
                     return Ok(addr);
                 } else {
@@ -53,12 +51,47 @@ pub mod discover {
             }
         }
 
-        pub async fn poll_inner(&mut self) -> Result<Option<u8>, ()> {
+        pub async fn obtain_addr_inner(&mut self) -> Result<Option<u8>, ()> {
+            println!("OAINNER");
             let mut bus = self.mutex.lock_bus().await;
             let timer = R::default();
 
-            let msg = super::receive_timeout_micros::<T, R>(bus.deref_mut(), timer.get_ticks(), 1000).await;
-            println!("SUB GOT MSG: {:?}", msg);
+            let msg = match super::receive_timeout_micros::<T, R>(
+                bus.deref_mut(),
+                timer.get_ticks(),
+                1_000_000
+            ).await {
+                Some(msg) => msg,
+                None => return Ok(None),
+            };
+
+            println!("DiNG");
+            let (addr, sub_random, delay, resp) = if let Some((addr, sub_random, delay, resp)) = BusSubMessage::generate_discover_ack(&mut self.rand, msg) {
+                (addr, sub_random, delay, resp)
+            } else {
+                return Ok(None)
+            };
+
+            println!("DaNG");
+            async_sleep_micros::<R>(timer.get_ticks(), delay).await;
+            bus.send_blocking(resp).map_err(drop)?;
+            println!("DoNG");
+
+            let msg = match super::receive_timeout_micros::<T, R>(
+                bus.deref_mut(),
+                timer.get_ticks(),
+                1_000_000
+            ).await {
+                Some(msg) => msg,
+                None => return Ok(None),
+            };
+
+            match msg.validate_discover_ack_ack(sub_random) {
+                Ok(new_addr) if new_addr == addr => println!("yey"),
+                Ok(_) => println!("wtf?"),
+                Err(_) => println!("ohno"),
+            }
+
             Ok(None)
         }
     }

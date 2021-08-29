@@ -1,7 +1,6 @@
-use std::num::NonZeroU8;
 use std::ops::{Deref, DerefMut};
-use std::thread::{spawn, sleep};
-use std::time::{Duration, Instant};
+use std::thread::sleep;
+use std::time::Duration;
 use sim_485::{Rs485Bus, Rs485Device};
 use sim_485::groundhog_sim::GlobalRollingTimer;
 use anachro_485::{
@@ -27,18 +26,18 @@ static SLAB: BSlab<TOTAL_SLABS, SLAB_SIZE> = BSlab::new();
 
 fn main() {
     SLAB.init().unwrap();
-    let mut arc_bus = Rs485Bus::new_arc();
+    let arc_bus = Rs485Bus::new_arc();
 
-    let mut dev_1 = Rs485Device::new(&arc_bus);
+    let dev_1 = Rs485Device::new(&arc_bus);
     let mut dev_2 = Rs485Device::new(&arc_bus);
 
     dev_2.enable_listen();
 
 
-    let dom = DummyDom { dev: dev_1, cobs_acc: CobsAccumulator::new(), carry: vec![] };
+    let dom = DummyDom { dev: dev_1, carry: vec![] };
     let dom_mtx = AsyncDomMutex::new(dom);
 
-    let sub = DummySub { dev: dev_2, cobs_acc: CobsAccumulator::new(), carry: vec![] };
+    let sub = DummySub { dev: dev_2, carry: vec![] };
     let sub_mtx = AsyncSubMutex::new(sub);
 
     let mut dom_disco: DomDiscovery<GlobalRollingTimer, DummyDom, _> = DomDiscovery::new(dom_mtx, thread_rng());
@@ -52,13 +51,15 @@ fn main() {
     let mut cas_dom = Cassette::new(dom_disco_future);
     let mut cas_sub = Cassette::new(sub_disco_future);
 
-    let mut start = Instant::now();
-
     loop {
         // Check the actual tasks
         cas_dom.poll_on();
-        if let Some(Ok(addr)) = cas_sub.poll_on() {
-            panic!("address! {}", addr);
+
+        if let Some(x) = cas_sub.poll_on() {
+            match x {
+                Ok(y) => panic!("address! {:?}", y),
+                Err(e) => panic!("err! {:?}", e),
+            }
         }
 
         // Rate limiting
@@ -66,17 +67,13 @@ fn main() {
     }
 }
 
-use postcard::CobsAccumulator;
-
 struct DummyDom {
     dev: Rs485Device,
-    cobs_acc: CobsAccumulator<1024>,
     carry: Vec<u8>,
 }
 
 struct DummySub {
     dev: Rs485Device,
-    cobs_acc: CobsAccumulator<1024>,
     carry: Vec<u8>,
 }
 
@@ -84,7 +81,11 @@ impl SubInterface for DummySub {
     fn send_blocking<'a>(&mut self, msg: anachro_485::icd::BusSubMessage<'a>) -> Result<(), anachro_485::icd::BusSubMessage<'a>> {
         println!("SUB: {:?}", msg);
         let ser_msg = postcard::to_stdvec_cobs(&msg).map_err(|_| msg)?;
-        println!("SUB: {:?}", ser_msg);
+        self.dev.disable_listen();
+        self.dev.enable_transmit();
+        self.dev.send(&ser_msg);
+        self.dev.disable_transmit();
+        self.dev.enable_listen();
         Ok(())
     }
 

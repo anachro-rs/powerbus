@@ -1,6 +1,7 @@
 pub use byte_slab::ManagedArcSlab;
 use byte_slab::SlabArc;
 pub use heapless::Vec;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 pub const MAX_ADDR_SEGMENTS: usize = 8;
@@ -202,9 +203,57 @@ impl<'a> BusDomMessage<'a> {
             },
         }
     }
+
+    pub fn validate_discover_ack_ack(&self, sub_random: u32) -> Result<u8, ()> {
+        let src_addr = self.src.get_exact_local_addr().ok_or(())?;
+        let dst_addr = self.dst.get_exact_local_addr().ok_or(())?;
+
+        if let BusDomPayload::DiscoverAckAck { own_id, own_random, own_id_ownrand_checksum } = self.payload {
+            if (dst_addr != own_id) || (src_addr != 0) {
+                return Err(());
+            }
+
+            let value = checksum_addr_random(own_id, own_random, sub_random);
+            if value != own_id_ownrand_checksum {
+                return Err(());
+            }
+
+            Ok(own_id)
+        } else {
+            return Err(());
+        }
+    }
 }
 
 impl<'a> BusSubMessage<'a> {
+    pub fn generate_discover_ack<R: Rng>(rng: &mut R, dom: BusDomMessage) -> Option<(u8, u32, u32, BusSubMessage<'static>)> {
+        let src = dom.src.get_exact_local_addr()?;
+        let dst = dom.dst.get_exact_local_addr()?;
+
+        if (src != 0) || (dst != 255) {
+            return None;
+        }
+
+        if let BusDomPayload::DiscoverInitial { random, min_wait_us, max_wait_us, offers } = dom.payload {
+            let delay = rng.gen_range(min_wait_us..max_wait_us);
+            let addr_idx = rng.gen_range(0..offers.len());
+            let addr = *offers.get(addr_idx)?;
+            let sub_random = rng.gen();
+
+            Some((addr, sub_random, delay, BusSubMessage {
+                dst: RefAddr::local_dom_addr(),
+                src: RefAddr::from_local_addr(addr),
+                payload: BusSubPayload::DiscoverAck {
+                    own_id: addr,
+                    own_random: sub_random,
+                    own_id_rand_checksum: checksum_addr_random(addr, random, sub_random),
+                }
+            }))
+        } else {
+            None
+        }
+    }
+
     pub fn validate_discover_ack_addr(&self, dom_random: u32) -> Result<(u8, u32), ()> {
         // Messages must come from the local bus
         let addr = self.src.get_exact_local_addr().ok_or(())?;
@@ -212,18 +261,21 @@ impl<'a> BusSubMessage<'a> {
         if let BusSubPayload::DiscoverAck { own_id, own_id_rand_checksum, own_random } = self.payload {
             // Source address must match claim address
             if own_id != addr {
+                println!("BAD ADDR");
                 return Err(());
             }
 
             // Terrible checksum!
-            let result = checksum_addr_random(own_id, own_random, dom_random);
+            let result = checksum_addr_random(own_id, dom_random, own_random);
 
             if own_id_rand_checksum == result {
                 Ok((addr, own_random))
             } else {
+                println!("BAD CKSM");
                 Err(())
             }
         } else {
+            println!("WRONG MSG");
             Err(())
         }
     }
