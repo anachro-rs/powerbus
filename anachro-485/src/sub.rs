@@ -59,7 +59,7 @@ pub mod discover {
 }
 
 pub trait SubInterface {
-    fn send_blocking(&mut self, msg: BusSubMessage) -> Result<(), BusDomMessage>;
+    fn send_blocking<'a>(&mut self, msg: BusSubMessage<'a>) -> Result<(), BusSubMessage<'a>>;
     fn pop(&mut self) -> Option<BusDomMessage<'static>>;
 }
 

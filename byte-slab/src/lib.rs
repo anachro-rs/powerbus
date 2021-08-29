@@ -1,4 +1,4 @@
-#![cfg_attr(not(test), no_std)]
+// #![cfg_attr(not(test), no_std)]
 
 /// # Byte Slab
 ///
@@ -245,7 +245,8 @@ impl<'a, const N: usize, const SZ: usize> Serialize for ManagedArcSlab<'a, N, SZ
     where
         S: serde::Serializer
     {
-        self.deref().serialize(serializer)
+        let data: &[u8] = self.deref();
+        data.serialize(serializer)
     }
 }
 
@@ -273,8 +274,18 @@ impl<'de: 'a, 'a, const N: usize, const SZ: usize> Deserialize<'de> for ManagedA
                 Ok(ManagedArcSlab::Borrowed(v))
             }
         }
-
         deserializer.deserialize_bytes(ByteVisitor { pd: PhantomData })
+    }
+}
+
+impl<'a, const N: usize, const SZ: usize> Deref for ManagedArcSlab<'a, N, SZ> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            ManagedArcSlab::Borrowed(data) => data,
+            ManagedArcSlab::Owned(ssa) => ssa.deref()
+        }
     }
 }
 

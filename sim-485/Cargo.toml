@@ -12,5 +12,9 @@ cassette = "0.2.3"
 heapless = "0.7.5"
 rand = "0.8.4"
 
+[dependencies.postcard]
+version = "0.7.2"
+features = ["use-std"]
+
 [dependencies.anachro-485]
 path = "../anachro-485"

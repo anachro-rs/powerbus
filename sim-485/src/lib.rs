@@ -3,14 +3,16 @@
 pub mod groundhog_sim;
 
 use std::{
-    num::NonZeroU8,
     sync::{
-        atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering::SeqCst},
+        atomic::{
+            AtomicBool, AtomicU32, AtomicU8, AtomicUsize,
+            Ordering::{self, SeqCst},
+        },
         mpsc::{channel, Receiver, Sender},
         Arc, Mutex,
     },
-    time::Duration,
     thread::sleep,
+    time::Duration,
 };
 
 // TODO: NOT a constant frequency
@@ -20,12 +22,15 @@ const BUS_FREQUENCY_HZ: u64 = BITS_PER_DATA_BYTE * 1_000_000;
 const BITS_PER_DATA_BYTE: u64 = 9;
 const NANOS_PER_BYTE: u64 = (1_000_000_000 * u8::BITS as u64) / BUS_FREQUENCY_HZ;
 
+static BUS_CTR: AtomicU32 = AtomicU32::new(1);
+static SIM_CTR: AtomicU32 = AtomicU32::new(1);
+
 #[derive(Debug)]
 pub struct Rs485Device {
     listening: Arc<AtomicBool>,
     receiver: Receiver<u8>,
     bus: Arc<Rs485Bus>,
-    addr: NonZeroU8,
+    sim_dev_ident: u32,
     sending: bool,
 }
 
@@ -33,29 +38,32 @@ pub struct Rs485Device {
 pub struct Rs485Bus {
     // TODO: Baud rate? Not a constant?
     shared: Mutex<Rs485BusShared>,
-    sender: AtomicU8,
-    ident: u32,
+    sender: AtomicU32,
+    sim_bus_ident: u32,
 }
 
 impl Rs485Bus {
-    pub const INACTIVE_SENDER: u8 = 0;
+    pub const INACTIVE_SENDER: u32 = 0;
 
-    pub fn new_arc(ident: u32) -> Arc<Self> {
+    pub fn new_arc() -> Arc<Self> {
         let shared = Mutex::new(Rs485BusShared::default());
-        let sender = AtomicU8::new(Self::INACTIVE_SENDER);
+        let sender = AtomicU32::new(Self::INACTIVE_SENDER);
 
         Arc::new(Self {
             shared,
             sender,
-            ident,
+            sim_bus_ident: BUS_CTR.fetch_add(1, Ordering::SeqCst),
         })
     }
 
     fn add_device(&self, funnel: DeviceFunnel) {
-        let mut lock = self.shared.lock().expect("Failed to lock mutex on device add");
+        let mut lock = self
+            .shared
+            .lock()
+            .expect("Failed to lock mutex on device add");
 
         // Check we aren't adding a duplicate address
-        let dupe = lock.funnels.iter().any(|f| f.addr == funnel.addr);
+        let dupe = lock.funnels.iter().any(|f| f.sim_ident == funnel.sim_ident);
         assert!(!dupe, "DUPLICATE ADDR ADDED TO BUS");
 
         lock.funnels.push(funnel);
@@ -65,7 +73,10 @@ impl Rs485Bus {
         // The bus should be active at the time of sending
         assert_ne!(Self::INACTIVE_SENDER, self.sender.load(SeqCst));
 
-        let mut lock = self.shared.lock().expect("Failed to lock mutex on data send");
+        let mut lock = self
+            .shared
+            .lock()
+            .expect("Failed to lock mutex on data send");
         for byte in data {
             // ha ha! rate limiting!
             sleep(Duration::from_nanos(NANOS_PER_BYTE));
@@ -86,17 +97,18 @@ struct Rs485BusShared {
 
 #[derive(Debug)]
 struct DeviceFunnel {
-    addr: NonZeroU8,
+    sim_ident: u32,
     listening: Arc<AtomicBool>,
     sender: Sender<u8>,
 }
 
 impl Rs485Device {
-    pub fn new(bus: &Arc<Rs485Bus>, addr: NonZeroU8) -> Self {
+    pub fn new(bus: &Arc<Rs485Bus>) -> Self {
         let listening = Arc::new(AtomicBool::new(false));
         let (prod, cons) = channel();
+        let sim_ident = SIM_CTR.fetch_add(1, Ordering::SeqCst);
         let funnel = DeviceFunnel {
-            addr,
+            sim_ident,
             listening: listening.clone(),
             sender: prod,
         };
@@ -106,7 +118,7 @@ impl Rs485Device {
             listening,
             receiver: cons,
             bus: bus.clone(),
-            addr,
+            sim_dev_ident: sim_ident,
             sending: false,
         }
     }
@@ -122,7 +134,7 @@ impl Rs485Device {
     pub fn enable_transmit(&mut self) {
         let swappy = self.bus.sender.compare_exchange(
             Rs485Bus::INACTIVE_SENDER,
-            self.addr.into(),
+            self.sim_dev_ident,
             SeqCst,
             SeqCst,
         );
@@ -132,7 +144,7 @@ impl Rs485Device {
 
     pub fn disable_transmit(&mut self) {
         let swappy = self.bus.sender.compare_exchange(
-            self.addr.into(),
+            self.sim_dev_ident,
             Rs485Bus::INACTIVE_SENDER,
             SeqCst,
             SeqCst,

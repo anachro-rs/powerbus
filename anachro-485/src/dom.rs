@@ -164,7 +164,7 @@ use futures::future::poll_fn;
 use groundhog::RollingTimer;
 
 pub trait DomInterface {
-    fn send_blocking(&mut self, msg: BusDomMessage) -> Result<(), BusDomMessage>;
+    fn send_blocking<'a>(&mut self, msg: BusDomMessage<'a>) -> Result<(), BusDomMessage<'a>>;
     fn pop(&mut self) -> Option<BusSubMessage<'static>>;
 }
 
