@@ -1,0 +1,6 @@
+[submodule "postcard-slab/postcard"]
+	path = postcard-slab/postcard
+	url = https://github.com/jamesmunns/postcard.git
+[submodule "postcard-slab/vendor/postcard"]
+	path = postcard-slab/vendor/postcard
+	url = https://github.com/jamesmunns/postcard.git

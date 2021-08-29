@@ -1,64 +1,150 @@
-use serde::{Serialize, Deserialize};
-use std::marker::PhantomData;
+pub use byte_slab::ManagedArcSlab;
+use byte_slab::SlabArc;
+pub use heapless::Vec;
+use serde::{Deserialize, Serialize};
+
+pub const MAX_ADDR_SEGMENTS: usize = 8;
+
+// These should prooooobably be configurable
+pub const TOTAL_SLABS: usize = 128;
+pub const SLAB_SIZE: usize = 512;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BusDomMessage<'a> {
-    // Mark the 'a lifetime as borrowed
-    #[serde(borrow)]
-    _lt_a: PhantomData<&'a ()>,
+    src: RefAddr,
+    dst: RefAddr,
 
-    src: RefAddr<'a>,
-    dst: RefAddr<'a>,
+    #[serde(borrow)]
     payload: BusDomPayload<'a>,
 }
 
 impl<'a> BusDomMessage<'a> {
-    pub fn new(src: RefAddr<'a>, dst: RefAddr<'a>, payload: BusDomPayload<'a>) -> Self {
-        Self {
-            src,
-            dst,
-            payload,
-            _lt_a: PhantomData,
-        }
+    pub fn new(src: RefAddr, dst: RefAddr, payload: BusDomPayload<'a>) -> Self {
+        Self { src, dst, payload }
+    }
+
+    pub fn reroot(self, arc: &SlabArc<TOTAL_SLABS, SLAB_SIZE>) -> Option<BusDomMessage<'static>> {
+        let BusDomMessage { src, dst, payload } = self;
+
+        // See https://github.com/rust-lang/rust/issues/88423 for why we need to
+        // be so verbose here.
+        let payload: BusDomPayload<'static> = match payload {
+            BusDomPayload::ResetConnection => BusDomPayload::ResetConnection,
+            BusDomPayload::Opaque(p) => BusDomPayload::Opaque(p.reroot(arc)?),
+            BusDomPayload::DiscoverInitial {
+                random,
+                min_wait_us,
+                max_wait_us,
+                offers,
+            } => {
+                let offers = offers.reroot(arc)?;
+                BusDomPayload::DiscoverInitial {
+                    random,
+                    min_wait_us,
+                    max_wait_us,
+                    offers,
+                }
+            }
+            BusDomPayload::DiscoverAckAck {
+                own_id,
+                own_random,
+                own_id_ownrand_checksum,
+            } => BusDomPayload::DiscoverAckAck {
+                own_id,
+                own_random,
+                own_id_ownrand_checksum,
+            },
+            BusDomPayload::BusGrant {
+                tx_bytes_ready,
+                rx_bytes_avail,
+                max_grant_us,
+            } => BusDomPayload::BusGrant {
+                tx_bytes_ready,
+                rx_bytes_avail,
+                max_grant_us,
+            },
+        };
+
+        Some(BusDomMessage { src, dst, payload })
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BusSubMessage<'a> {
-    // Mark the 'a lifetime as borrowed
-    #[serde(borrow)]
-    _lt_a: PhantomData<&'a ()>,
+    src: RefAddr,
+    dst: RefAddr,
 
-    src: RefAddr<'a>,
-    dst: RefAddr<'a>,
+    #[serde(borrow)]
     payload: BusSubPayload<'a>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RefAddr<'a> {
-    bytes: &'a [u8],
+impl<'a> BusSubMessage<'a> {
+    pub fn reroot(self, arc: &SlabArc<TOTAL_SLABS, SLAB_SIZE>) -> Option<BusSubMessage<'static>> {
+        let BusSubMessage { src, dst, payload } = self;
+
+
+        // See https://github.com/rust-lang/rust/issues/88423 for why we need to
+        // be so verbose here.
+        let payload: BusSubPayload<'static> = match payload {
+            BusSubPayload::Opaque(p) => BusSubPayload::Opaque(p.reroot(arc)?),
+            BusSubPayload::DiscoverAck {
+                own_id,
+                own_id_rand_checksum,
+                own_random,
+            } => BusSubPayload::DiscoverAck {
+                own_id,
+                own_id_rand_checksum,
+                own_random,
+            },
+            BusSubPayload::BusGrantAccept {
+                tx_bytes_ready,
+                rx_bytes_avail,
+            } => BusSubPayload::BusGrantAccept {
+                tx_bytes_ready,
+                rx_bytes_avail,
+            },
+            BusSubPayload::BusGrantRelease => BusSubPayload::BusGrantRelease,
+        };
+        Some(BusSubMessage { src, dst, payload })
+    }
 }
 
-impl<'a> RefAddr<'a> {
-    pub fn from_addrs(bytes: &'a [u8]) -> Self {
-        Self {
-            bytes,
-        }
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RefAddr {
+    bytes: Vec<u8, MAX_ADDR_SEGMENTS>,
+}
+
+impl RefAddr {
+    pub fn from_addrs(bytes: &[u8]) -> Result<Self, ()> {
+        Vec::from_slice(bytes).map(|v| Self { bytes: v })
     }
 
-    pub const LOCAL_DOM_ADDR: RefAddr<'static> = RefAddr { bytes: &[0x00] };
-    pub const LOCAL_BROADCAST_ADDR: RefAddr<'static> = RefAddr { bytes: &[0xFF] };
+    pub fn local_dom_addr() -> Self {
+        let mut vec = Vec::new();
+        vec.push(0x00).ok();
+        Self { bytes: vec }
+    }
+
+    pub fn local_broadcast_addr() -> Self {
+        let mut vec = Vec::new();
+        vec.push(0xFF).ok();
+        Self { bytes: vec }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum BusDomPayload<'a> {
     ResetConnection,
-    Opaque(&'a [u8]),
+
+    #[serde(borrow)]
+    Opaque(ManagedArcSlab<'a, TOTAL_SLABS, SLAB_SIZE>),
     DiscoverInitial {
         random: u32,
         min_wait_us: u32,
         max_wait_us: u32,
-        offers: &'a [u8],
+
+        #[serde(borrow)]
+        offers: ManagedArcSlab<'a, TOTAL_SLABS, SLAB_SIZE>,
     },
     DiscoverAckAck {
         own_id: u8,
@@ -72,9 +158,12 @@ pub enum BusDomPayload<'a> {
     },
 }
 
+impl<'a> BusDomPayload<'a> {}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub enum BusSubPayload<'a> {
-    Opaque(&'a [u8]),
+    #[serde(borrow)]
+    Opaque(ManagedArcSlab<'a, TOTAL_SLABS, SLAB_SIZE>),
     DiscoverAck {
         own_id: u8,
         own_id_rand_checksum: u32,

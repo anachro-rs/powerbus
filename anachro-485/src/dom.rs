@@ -1,4 +1,5 @@
 pub mod discover {
+    use byte_slab::ManagedArcSlab;
     use groundhog::RollingTimer;
     use core::marker::PhantomData;
     use crate::async_sleep_millis;
@@ -75,17 +76,17 @@ pub mod discover {
                 random: self.rand.gen(),
                 min_wait_us: 1_000,
                 max_wait_us: 10_000,
-                offers: &avail_addrs,
+                offers: ManagedArcSlab::from_slice(&avail_addrs),
             };
             let message = BusDomMessage::new(
-                RefAddr::LOCAL_DOM_ADDR,
-                RefAddr::LOCAL_BROADCAST_ADDR,
+                RefAddr::local_dom_addr(),
+                RefAddr::local_broadcast_addr(),
                 payload,
             );
             bus.send_blocking(message).unwrap();
 
             // Start the
-            let start = timer.get_ticks();
+            // let start = timer.get_ticks();
 
             Ok(())
         }
@@ -146,29 +147,28 @@ where
 }
 
 // ohhhh lifetimes
-pub async fn receive_timeout_micros<'a, T, R>(
-    interface: &'a mut T,
-    start: R::Tick,
-    duration: R::Tick,
-) -> Option<BusSubMessage<'a>>
-where
-    T: DomInterface,
-    R: RollingTimer<Tick = u32> + Default,
-{
-    poll_fn(move |_| {
-        let timer = R::default();
-        if timer.micros_since(start) >= duration {
-            Poll::Ready(None)
-        } else {
-            match interface.pop() {
-                m @ Some(_) => Poll::Ready(m),
-                _ => Poll::Pending
-            }
-        }
-    }).await
-}
+// pub async fn receive_timeout_micros<'a, T, R>(
+//     interface: &'a mut T,
+//     start: R::Tick,
+//     duration: R::Tick,
+// ) -> Option<BusSubMessage<'a>>
+// where
+//     T: DomInterface,
+//     R: RollingTimer<Tick = u32> + Default,
+// {
+//     poll_fn(move |_| {
+//         let timer = R::default();
+//         if timer.micros_since(start) >= duration {
+//             Poll::Ready(None)
+//         } else {
+//             match interface.pop() {
+//                 m @ Some(_) => Poll::Ready(m),
+//                 _ => Poll::Pending
+//             }
+//         }
+//     }).await
+// }
 
-use groundhog::RollingTimer;
 use heapless::Vec;
 
 pub struct AddrTable32 {

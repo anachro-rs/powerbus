@@ -10,6 +10,9 @@ postcard = "0.7.2"
 groundhog = "0.2.5"
 heapless = "0.7.5"
 
+[dependencies.byte-slab]
+path = "../byte-slab"
+
 [dependencies.rand]
 version = "0.8.4"
 default-features = false
