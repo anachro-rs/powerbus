@@ -3,11 +3,15 @@ pub mod discover {
     use groundhog::RollingTimer;
     use core::marker::PhantomData;
     use crate::async_sleep_millis;
+    use crate::icd::BusSubMessage;
     use crate::icd::RefAddr;
     use super::AsyncDomMutex;
     use super::DomInterface;
     use rand::Rng;
     use crate::icd::{BusDomMessage, BusDomPayload};
+    use heapless::{Vec, FnvIndexSet, FnvIndexMap};
+    use core::ops::DerefMut;
+    use core::iter::FromIterator;
 
     pub struct Discovery<R, T, A>
     where
@@ -47,13 +51,6 @@ pub mod discover {
         }
 
         pub async fn poll_inner(&mut self) -> Result<(), ()> {
-            // Broadcast initial
-            self.broadcast_initial().await?;
-            Ok(())
-        }
-
-        pub async fn broadcast_initial(&mut self) -> Result<(), ()> {
-            let timer = R::default();
             let avail_addrs = {
                 self.mutex
                     .lock_table()
@@ -65,15 +62,23 @@ pub mod discover {
                 return Err(());
             }
 
-            // ------ TODO ------------------------------
-            // After this line, you need to remember to
-            // release any reserved addresses. Maybe I'll
-            // impl drop in the future for this.
+
+            // Broadcast initial
+            let readies = self.broadcast_initial(&avail_addrs).await?;
+            println!("READIES: {:?}", readies);
+            // TODO!
+
+            Ok(())
+        }
+
+        pub async fn broadcast_initial(&mut self, avail_addrs: &[u8]) -> Result<Vec<u8, 32>, ()> {
+            let timer = R::default();
 
             let mut bus = self.mutex.lock_bus().await;
+            let dom_random = self.rand.gen();
 
             let payload = BusDomPayload::DiscoverInitial {
-                random: self.rand.gen(),
+                random: dom_random,
                 min_wait_us: 1_000,
                 max_wait_us: 10_000,
                 offers: ManagedArcSlab::from_slice(&avail_addrs),
@@ -85,10 +90,72 @@ pub mod discover {
             );
             bus.send_blocking(message).unwrap();
 
-            // Start the
-            // let start = timer.get_ticks();
+            // Start the receive
+            let start = timer.get_ticks();
+            let mut resps = Vec::<_, 32>::new();
 
-            Ok(())
+            // Collect until timeout, or max messages received
+            // ------ TODO ------------------------------
+            // EARLY RETURNS!
+            while !resps.is_full() {
+                let maybe_msg = super::receive_timeout_micros::<T, R>(bus.deref_mut(), start, 12_000u32).await;
+
+                if let Some(msg) = maybe_msg {
+                    resps.push(msg).map_err(drop)?;
+                } else {
+                    break;
+                }
+            }
+
+            let mut offered = FnvIndexSet::<u8, 32>::new();
+            let mut seen = FnvIndexSet::<u8, 32>::new();
+            let mut dupes = FnvIndexSet::<u8, 32>::new();
+
+
+            avail_addrs.iter().try_for_each::<_, Result<_, u8>>(|a| {
+                offered.insert(*a)?;
+                Ok(())
+            }).map_err(drop)?;
+
+            let mut response_pairs = FnvIndexMap::<_, _, 32>::from_iter(
+                resps.iter()
+                    // Remove any items that don't check out
+                    .filter_map(|resp| resp.validate_discover_ack_addr(dom_random).ok())
+                    // Remove any items that weren't offered
+                    .filter(|(resp_addr, _)| offered.contains(resp_addr))
+                    .map(|(addr, sub_random)| {
+                        // If the set did not have this value present, true is returned.
+                        // If the set did have this value present, false is returned.
+                        let new_addr = seen.insert(addr)?;
+                        if !new_addr {
+                            let _ = dupes.insert(addr)?;
+                        }
+                        Ok((addr, sub_random))
+                    })
+                    .filter_map(Result::<_, u8>::ok)
+            );
+
+            // Remove any duplicates that have been seen
+            dupes.iter().for_each(|d| {
+                let _ = response_pairs.remove(d);
+            });
+
+            let mut accepted = Vec::<u8, 32>::new();
+            // ACK acceptable response pairs
+            for (addr, sub_random) in response_pairs.iter() {
+                if let Ok(_) = accepted.push(*addr) {
+                    bus.send_blocking(
+                        BusDomMessage::generate_discover_ack_ack(
+                            *addr,
+                            self.rand.gen(),
+                            *sub_random
+                        )
+                    ).unwrap();
+                }
+            }
+
+
+            Ok(accepted)
         }
     }
 }
@@ -97,10 +164,11 @@ use crate::icd::{BusDomMessage, BusSubMessage};
 use std::sync::{Arc, Mutex, MutexGuard};
 use core::task::Poll;
 use futures::future::poll_fn;
+use groundhog::RollingTimer;
 
 pub trait DomInterface {
     fn send_blocking(&mut self, msg: BusDomMessage) -> Result<(), BusDomMessage>;
-    fn pop(&mut self) -> Option<BusSubMessage>;
+    fn pop(&mut self) -> Option<BusSubMessage<'static>>;
 }
 
 // hmmm
@@ -146,28 +214,27 @@ where
     }
 }
 
-// ohhhh lifetimes
-// pub async fn receive_timeout_micros<'a, T, R>(
-//     interface: &'a mut T,
-//     start: R::Tick,
-//     duration: R::Tick,
-// ) -> Option<BusSubMessage<'a>>
-// where
-//     T: DomInterface,
-//     R: RollingTimer<Tick = u32> + Default,
-// {
-//     poll_fn(move |_| {
-//         let timer = R::default();
-//         if timer.micros_since(start) >= duration {
-//             Poll::Ready(None)
-//         } else {
-//             match interface.pop() {
-//                 m @ Some(_) => Poll::Ready(m),
-//                 _ => Poll::Pending
-//             }
-//         }
-//     }).await
-// }
+pub async fn receive_timeout_micros<T, R>(
+    interface: &mut T,
+    start: R::Tick,
+    duration: R::Tick,
+) -> Option<BusSubMessage<'static>>
+where
+    T: DomInterface,
+    R: RollingTimer<Tick = u32> + Default,
+{
+    poll_fn(move |_| {
+        let timer = R::default();
+        if timer.micros_since(start) >= duration {
+            Poll::Ready(None)
+        } else {
+            match interface.pop() {
+                m @ Some(_) => Poll::Ready(m),
+                _ => Poll::Pending
+            }
+        }
+    }).await
+}
 
 use heapless::Vec;
 
@@ -200,12 +267,12 @@ impl AddrTable32 {
         ret
     }
 
-    /// Returns any newly reserved addrs
+    /// Returns any reserved addrs
     pub fn reserve_all_addrs(&mut self) -> Vec<u8, 32> {
-        let mut copy = self.available;
         self.reserved |= self.available;
         self.available = 0;
         let mut ret = Vec::new();
+        let mut copy = self.reserved;
 
         for i in 1..=32 {
             if copy & 0x0000_0001 != 0 {

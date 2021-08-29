@@ -11,11 +11,11 @@ pub const SLAB_SIZE: usize = 512;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BusDomMessage<'a> {
-    src: RefAddr,
-    dst: RefAddr,
+    pub src: RefAddr,
+    pub dst: RefAddr,
 
     #[serde(borrow)]
-    payload: BusDomPayload<'a>,
+    pub payload: BusDomPayload<'a>,
 }
 
 impl<'a> BusDomMessage<'a> {
@@ -71,11 +71,11 @@ impl<'a> BusDomMessage<'a> {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BusSubMessage<'a> {
-    src: RefAddr,
-    dst: RefAddr,
+    pub src: RefAddr,
+    pub dst: RefAddr,
 
     #[serde(borrow)]
-    payload: BusSubPayload<'a>,
+    pub payload: BusSubPayload<'a>,
 }
 
 impl<'a> BusSubMessage<'a> {
@@ -119,6 +119,12 @@ impl RefAddr {
         Vec::from_slice(bytes).map(|v| Self { bytes: v })
     }
 
+    pub fn from_local_addr(addr: u8) -> Self {
+        let mut vec = Vec::new();
+        vec.push(addr).ok();
+        Self { bytes: vec }
+    }
+
     pub fn local_dom_addr() -> Self {
         let mut vec = Vec::new();
         vec.push(0x00).ok();
@@ -129,6 +135,14 @@ impl RefAddr {
         let mut vec = Vec::new();
         vec.push(0xFF).ok();
         Self { bytes: vec }
+    }
+
+    pub fn get_exact_local_addr(&self) -> Option<u8> {
+        if self.bytes.len() != 1 {
+            // Not a local addr, has a chain
+            return None;
+        }
+        self.bytes.get(0).cloned()
     }
 }
 
@@ -174,4 +188,52 @@ pub enum BusSubPayload<'a> {
         rx_bytes_avail: u32,
     },
     BusGrantRelease,
+}
+
+impl<'a> BusDomMessage<'a> {
+    pub fn generate_discover_ack_ack(addr: u8, dom_random: u32, sub_random: u32) -> BusDomMessage<'static> {
+        BusDomMessage{
+            src: RefAddr::local_dom_addr(),
+            dst: RefAddr::from_local_addr(addr),
+            payload: BusDomPayload::DiscoverAckAck {
+                own_id: addr,
+                own_random: dom_random,
+                own_id_ownrand_checksum: checksum_addr_random(addr, dom_random, sub_random),
+            },
+        }
+    }
+}
+
+impl<'a> BusSubMessage<'a> {
+    pub fn validate_discover_ack_addr(&self, dom_random: u32) -> Result<(u8, u32), ()> {
+        // Messages must come from the local bus
+        let addr = self.src.get_exact_local_addr().ok_or(())?;
+
+        if let BusSubPayload::DiscoverAck { own_id, own_id_rand_checksum, own_random } = self.payload {
+            // Source address must match claim address
+            if own_id != addr {
+                return Err(());
+            }
+
+            // Terrible checksum!
+            let result = checksum_addr_random(own_id, own_random, dom_random);
+
+            if own_id_rand_checksum == result {
+                Ok((addr, own_random))
+            } else {
+                Err(())
+            }
+        } else {
+            Err(())
+        }
+    }
+}
+
+fn checksum_addr_random(addr: u8, dom_random: u32, sub_random: u32) -> u32 {
+    let id_word = u32::from_ne_bytes([addr; 4]);
+    id_word
+        .wrapping_mul(dom_random)
+        .wrapping_add(dom_random)
+        .wrapping_mul(sub_random)
+        .wrapping_add(sub_random)
 }
