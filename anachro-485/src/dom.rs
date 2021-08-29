@@ -40,7 +40,7 @@ pub mod discover {
         pub async fn poll(&mut self) -> ! {
             let timer = R::default();
             loop {
-                async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
+                async_sleep_millis::<R>(timer.get_ticks(), 5000u32).await;
 
                 match self.poll_inner().await {
                     Ok(_) => println!("Poll good!"),
@@ -90,7 +90,7 @@ pub mod discover {
             // Collect until timeout, or max messages received
             while !resps.is_full() {
                 let maybe_msg =
-                    super::receive_timeout_micros::<T, R>(bus.deref_mut(), start, 12_000u32).await;
+                    super::receive_timeout_micros::<T, R>(bus.deref_mut(), start, 20_000u32).await;
 
                 if let Some(msg) = maybe_msg {
                     resps.push(msg).map_err(drop)?;
@@ -135,11 +135,14 @@ pub mod discover {
             );
 
             println!("RPs: {:?}", response_pairs);
+            println!("DUPES: {:?}", dupes);
 
             // Remove any duplicates that have been seen
             dupes.iter().for_each(|d| {
                 let _ = response_pairs.remove(d);
             });
+
+            println!("RPs: {:?}", response_pairs);
 
             let mut accepted = Vec::<u8, 32>::new();
             // ACK acceptable response pairs

@@ -29,33 +29,83 @@ fn main() {
     let arc_bus = Rs485Bus::new_arc();
 
     let dev_1 = Rs485Device::new(&arc_bus);
+
     let mut dev_2 = Rs485Device::new(&arc_bus);
+    let mut dev_3 = Rs485Device::new(&arc_bus);
+    let mut dev_4 = Rs485Device::new(&arc_bus);
+    let mut dev_5 = Rs485Device::new(&arc_bus);
 
     dev_2.enable_listen();
+    dev_3.enable_listen();
+    dev_4.enable_listen();
+    dev_5.enable_listen();
 
 
     let dom = DummyDom { dev: dev_1, carry: vec![] };
     let dom_mtx = AsyncDomMutex::new(dom);
 
-    let sub = DummySub { dev: dev_2, carry: vec![] };
-    let sub_mtx = AsyncSubMutex::new(sub);
+    let sub_1 = DummySub { dev: dev_2, carry: vec![] };
+    let sub_mtx_1 = AsyncSubMutex::new(sub_1);
+    let sub_2 = DummySub { dev: dev_3, carry: vec![] };
+    let sub_mtx_2 = AsyncSubMutex::new(sub_2);
+    let sub_3 = DummySub { dev: dev_4, carry: vec![] };
+    let sub_mtx_3 = AsyncSubMutex::new(sub_3);
+    let sub_4 = DummySub { dev: dev_5, carry: vec![] };
+    let sub_mtx_4 = AsyncSubMutex::new(sub_4);
 
     let mut dom_disco: DomDiscovery<GlobalRollingTimer, DummyDom, _> = DomDiscovery::new(dom_mtx, thread_rng());
     let dom_disco_future = dom_disco.poll();
     pin_mut!(dom_disco_future);
 
-    let mut sub_disco: SubDiscovery<GlobalRollingTimer, DummySub, _> = SubDiscovery::new(sub_mtx, thread_rng());
-    let sub_disco_future = sub_disco.obtain_addr();
-    pin_mut!(sub_disco_future);
+    let mut sub_disco_1: SubDiscovery<GlobalRollingTimer, DummySub, _> = SubDiscovery::new(sub_mtx_1, thread_rng());
+    let sub_disco_future_1 = sub_disco_1.obtain_addr();
+    pin_mut!(sub_disco_future_1);
+
+    let mut sub_disco_2: SubDiscovery<GlobalRollingTimer, DummySub, _> = SubDiscovery::new(sub_mtx_2, thread_rng());
+    let sub_disco_future_2 = sub_disco_2.obtain_addr();
+    pin_mut!(sub_disco_future_2);
+
+    let mut sub_disco_3: SubDiscovery<GlobalRollingTimer, DummySub, _> = SubDiscovery::new(sub_mtx_3, thread_rng());
+    let sub_disco_future_3 = sub_disco_3.obtain_addr();
+    pin_mut!(sub_disco_future_3);
+
+    let mut sub_disco_4: SubDiscovery<GlobalRollingTimer, DummySub, _> = SubDiscovery::new(sub_mtx_4, thread_rng());
+    let sub_disco_future_4 = sub_disco_4.obtain_addr();
+    pin_mut!(sub_disco_future_4);
 
     let mut cas_dom = Cassette::new(dom_disco_future);
-    let mut cas_sub = Cassette::new(sub_disco_future);
+
+    let mut cas_sub_1 = Cassette::new(sub_disco_future_1);
+    let mut cas_sub_2 = Cassette::new(sub_disco_future_2);
+    let mut cas_sub_3 = Cassette::new(sub_disco_future_3);
+    let mut cas_sub_4 = Cassette::new(sub_disco_future_4);
 
     loop {
         // Check the actual tasks
         cas_dom.poll_on();
 
-        if let Some(x) = cas_sub.poll_on() {
+        if let Some(x) = cas_sub_1.poll_on() {
+            match x {
+                Ok(y) => panic!("address! {:?}", y),
+                Err(e) => panic!("err! {:?}", e),
+            }
+        }
+
+        if let Some(x) = cas_sub_2.poll_on() {
+            match x {
+                Ok(y) => panic!("address! {:?}", y),
+                Err(e) => panic!("err! {:?}", e),
+            }
+        }
+
+        if let Some(x) = cas_sub_3.poll_on() {
+            match x {
+                Ok(y) => panic!("address! {:?}", y),
+                Err(e) => panic!("err! {:?}", e),
+            }
+        }
+
+        if let Some(x) = cas_sub_4.poll_on() {
             match x {
                 Ok(y) => panic!("address! {:?}", y),
                 Err(e) => panic!("err! {:?}", e),
