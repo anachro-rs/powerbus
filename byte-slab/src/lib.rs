@@ -1,4 +1,4 @@
-// #![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(test), no_std)]
 
 /// # Byte Slab
 ///
@@ -332,7 +332,6 @@ impl<'a, const N: usize, const SZ: usize> ManagedArcSlab<'a, N, SZ> {
 
 
 // SAFETY: YOLO
-unsafe impl<const N: usize, const SZ: usize> Sync for SlabBox<N, SZ> { }
 unsafe impl<const N: usize, const SZ: usize> Send for SlabBox<N, SZ> { }
 
 pub struct BSlab<const N: usize, const SZ: usize> {

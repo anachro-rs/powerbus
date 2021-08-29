@@ -1,9 +1,10 @@
 use std::{sync::{Arc, Mutex, MutexGuard}, task::Poll};
 use crate::icd::{BusDomMessage, BusSubMessage};
 use futures::future::poll_fn;
+use groundhog::RollingTimer;
 
 pub mod discover {
-    use std::marker::PhantomData;
+    use std::{marker::PhantomData, ops::DerefMut};
 
     use groundhog::RollingTimer;
     use rand::Rng;
@@ -53,6 +54,11 @@ pub mod discover {
         }
 
         pub async fn poll_inner(&mut self) -> Result<Option<u8>, ()> {
+            let mut bus = self.mutex.lock_bus().await;
+            let timer = R::default();
+
+            let msg = super::receive_timeout_micros::<T, R>(bus.deref_mut(), timer.get_ticks(), 1000).await;
+            println!("SUB GOT MSG: {:?}", msg);
             Ok(None)
         }
     }
@@ -92,4 +98,26 @@ where
             }
         }).await
     }
+}
+
+pub async fn receive_timeout_micros<T, R>(
+    interface: &mut T,
+    start: R::Tick,
+    duration: R::Tick,
+) -> Option<BusDomMessage<'static>>
+where
+    T: SubInterface,
+    R: RollingTimer<Tick = u32> + Default,
+{
+    poll_fn(move |_| {
+        let timer = R::default();
+        if timer.micros_since(start) >= duration {
+            Poll::Ready(None)
+        } else {
+            match interface.pop() {
+                m @ Some(_) => Poll::Ready(m),
+                _ => Poll::Pending
+            }
+        }
+    }).await
 }

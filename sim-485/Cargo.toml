@@ -18,3 +18,11 @@ features = ["use-std"]
 
 [dependencies.anachro-485]
 path = "../anachro-485"
+
+[dependencies.byte-slab]
+path = "../byte-slab"
+
+[dependencies.cobs]
+version = "0.1.5-pre"
+default-features = false
+package = "postcard-cobs"
