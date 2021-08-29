@@ -95,8 +95,6 @@ pub mod discover {
             let mut resps = Vec::<_, 32>::new();
 
             // Collect until timeout, or max messages received
-            // ------ TODO ------------------------------
-            // EARLY RETURNS!
             while !resps.is_full() {
                 let maybe_msg = super::receive_timeout_micros::<T, R>(bus.deref_mut(), start, 12_000u32).await;
 
@@ -110,7 +108,6 @@ pub mod discover {
             let mut offered = FnvIndexSet::<u8, 32>::new();
             let mut seen = FnvIndexSet::<u8, 32>::new();
             let mut dupes = FnvIndexSet::<u8, 32>::new();
-
 
             avail_addrs.iter().try_for_each::<_, Result<_, u8>>(|a| {
                 offered.insert(*a)?;
