@@ -64,6 +64,7 @@ impl<'a> BusDomMessage<'a> {
                 rx_bytes_avail,
                 max_grant_us,
             },
+            BusDomPayload::PingReq { random, min_wait_us, max_wait_us } => BusDomPayload::PingReq { random, min_wait_us, max_wait_us },
         };
 
         Some(BusDomMessage { src, dst, payload })
@@ -105,6 +106,7 @@ impl<'a> BusSubMessage<'a> {
                 rx_bytes_avail,
             },
             BusSubPayload::BusGrantRelease => BusSubPayload::BusGrantRelease,
+            BusSubPayload::PingAck { own_id_checksum, own_random } => BusSubPayload::PingAck { own_id_checksum, own_random },
         };
         Some(BusSubMessage { src, dst, payload })
     }
@@ -166,6 +168,11 @@ pub enum BusDomPayload<'a> {
         own_random: u32,
         own_id_ownrand_checksum: u32,
     },
+    PingReq {
+        random: u32,
+        min_wait_us: u32,
+        max_wait_us: u32,
+    },
     BusGrant {
         tx_bytes_ready: u32,
         rx_bytes_avail: u32,
@@ -187,6 +194,10 @@ pub enum BusSubPayload<'a> {
     BusGrantAccept {
         tx_bytes_ready: u32,
         rx_bytes_avail: u32,
+    },
+    PingAck {
+        own_id_checksum: u32,
+        own_random: u32,
     },
     BusGrantRelease,
 }
@@ -226,6 +237,31 @@ impl<'a> BusDomMessage<'a> {
 }
 
 impl<'a> BusSubMessage<'a> {
+    pub fn generate_ping_ack<R: Rng>(rng: &mut R, own_addr: u8, dom: BusDomMessage) -> Option<(u32, BusSubMessage<'static>)> {
+        let src = dom.src.get_exact_local_addr()?;
+        let dst = dom.dst.get_exact_local_addr()?;
+
+        if (src != 0) || (dst != own_addr) {
+            return None;
+        }
+
+        if let BusDomPayload::PingReq { random, min_wait_us, max_wait_us } = dom.payload {
+            let rand = rng.gen();
+            let jitter = rng.gen_range(min_wait_us..max_wait_us);
+
+            Some((jitter, BusSubMessage {
+                src: RefAddr::from_local_addr(own_addr),
+                dst: RefAddr::local_dom_addr(),
+                payload: BusSubPayload::PingAck {
+                    own_id_checksum: checksum_addr_random(own_addr, random, rand),
+                    own_random: rand,
+                }
+            }))
+        } else {
+            None
+        }
+    }
+
     pub fn generate_discover_ack<R: Rng>(rng: &mut R, dom: BusDomMessage) -> Option<(u8, u32, u32, BusSubMessage<'static>)> {
         let src = dom.src.get_exact_local_addr()?;
         let dst = dom.dst.get_exact_local_addr()?;
@@ -279,9 +315,29 @@ impl<'a> BusSubMessage<'a> {
             Err(())
         }
     }
+
+    pub fn validate_ping_ack(&self, dom_random: u32) -> Result<(), ()> {
+        // Messages must come from the local bus
+        let addr = self.src.get_exact_local_addr().ok_or(())?;
+
+        if let BusSubPayload::PingAck { own_id_checksum, own_random } = self.payload {
+            // Terrible checksum!
+            let result = checksum_addr_random(addr, dom_random, own_random);
+
+            if own_id_checksum == result {
+                Ok(())
+            } else {
+                println!("BAD CKSM");
+                Err(())
+            }
+        } else {
+            println!("WRONG MSG");
+            Err(())
+        }
+    }
 }
 
-fn checksum_addr_random(addr: u8, dom_random: u32, sub_random: u32) -> u32 {
+pub fn checksum_addr_random(addr: u8, dom_random: u32, sub_random: u32) -> u32 {
     let id_word = u32::from_ne_bytes([addr; 4]);
     id_word
         .wrapping_mul(dom_random)

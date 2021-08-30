@@ -16,11 +16,12 @@ use std::{
 };
 
 // TODO: NOT a constant frequency
-const BUS_FREQUENCY_HZ: u64 = BITS_PER_DATA_BYTE * 1_000_000;
+// const BUS_FREQUENCY_HZ: u64 = BITS_PER_DATA_BYTE * 1_000_000;
+const BUS_FREQUENCY_HZ: u64 = 115200;
 
 // Assuming 8N1 UART mode
 const BITS_PER_DATA_BYTE: u64 = 9;
-const NANOS_PER_BYTE: u64 = (1_000_000_000 * u8::BITS as u64) / BUS_FREQUENCY_HZ;
+const NANOS_PER_BYTE: u64 = (1_000_000_000 * BITS_PER_DATA_BYTE) / BUS_FREQUENCY_HZ;
 
 static BUS_CTR: AtomicU32 = AtomicU32::new(1);
 static SIM_CTR: AtomicU32 = AtomicU32::new(1);
@@ -38,20 +39,18 @@ pub struct Rs485Device {
 pub struct Rs485Bus {
     // TODO: Baud rate? Not a constant?
     shared: Mutex<Rs485BusShared>,
-    sender: AtomicU32,
+    senders: AtomicU32,
     sim_bus_ident: u32,
 }
 
 impl Rs485Bus {
-    pub const INACTIVE_SENDER: u32 = 0;
-
     pub fn new_arc() -> Arc<Self> {
         let shared = Mutex::new(Rs485BusShared::default());
-        let sender = AtomicU32::new(Self::INACTIVE_SENDER);
+        let senders = AtomicU32::new(0);
 
         Arc::new(Self {
             shared,
-            sender,
+            senders,
             sim_bus_ident: BUS_CTR.fetch_add(1, Ordering::SeqCst),
         })
     }
@@ -71,19 +70,24 @@ impl Rs485Bus {
 
     fn send_data(&self, data: &[u8]) {
         // The bus should be active at the time of sending
-        assert_ne!(Self::INACTIVE_SENDER, self.sender.load(SeqCst));
-
         let mut lock = self
             .shared
             .lock()
             .expect("Failed to lock mutex on data send");
         for byte in data {
             // ha ha! rate limiting!
+            let senders_before_good = self.senders.load(SeqCst) == 1;
             sleep(Duration::from_nanos(NANOS_PER_BYTE));
+            let senders_after_good = self.senders.load(SeqCst) == 1;
 
             for dev in lock.funnels.iter_mut() {
                 if dev.listening.load(SeqCst) {
-                    dev.sender.send(*byte).unwrap();
+                    if senders_before_good && senders_after_good {
+                        dev.sender.send(*byte).unwrap();
+                    } else {
+                        println!("Corrupted byte!");
+                        dev.sender.send(0xAF).unwrap();
+                    }
                 }
             }
         }
@@ -132,24 +136,13 @@ impl Rs485Device {
     }
 
     pub fn enable_transmit(&mut self) {
-        let swappy = self.bus.sender.compare_exchange(
-            Rs485Bus::INACTIVE_SENDER,
-            self.sim_dev_ident,
-            SeqCst,
-            SeqCst,
-        );
-        assert!(swappy.is_ok(), "BUS FAULT - ACQUIRE");
+        let old = self.bus.senders.fetch_add(1, SeqCst);
+        println!("Senders: {}", old + 1);
         self.sending = true;
     }
 
     pub fn disable_transmit(&mut self) {
-        let swappy = self.bus.sender.compare_exchange(
-            self.sim_dev_ident,
-            Rs485Bus::INACTIVE_SENDER,
-            SeqCst,
-            SeqCst,
-        );
-        assert!(swappy.is_ok(), "BUS FAULT - RELEASE");
+        self.bus.senders.fetch_sub(1, SeqCst);
         self.sending = false;
     }
 

@@ -93,8 +93,31 @@ pub mod discover {
                 }
             }
 
+            let start = timer.get_ticks();
+            let mut success_ct = 0;
 
-            Ok(None)
+            loop {
+                let msg = match super::receive_timeout_micros::<T, R>(
+                    bus.deref_mut(),
+                    start,
+                    5_000_000,
+                ).await {
+                    Some(msg) => msg,
+                    None => return Ok(None),
+                };
+
+                let j_start = timer.get_ticks();
+                if let Some((jitter, msg)) = BusSubMessage::generate_ping_ack(&mut self.rand, addr, msg) {
+                    async_sleep_micros::<R>(j_start, jitter).await;
+
+                    bus.send_blocking(msg).map_err(drop)?;
+
+                    success_ct += 1;
+                    if success_ct >= 2 {
+                        return Ok(Some(addr));
+                    }
+                }
+            }
         }
     }
 }

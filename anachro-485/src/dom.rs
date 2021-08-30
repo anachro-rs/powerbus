@@ -2,6 +2,8 @@ pub mod discover {
     use super::AsyncDomMutex;
     use super::DomInterface;
     use crate::async_sleep_millis;
+    use crate::dom;
+    use crate::icd::BusSubPayload;
     use crate::icd::RefAddr;
     use crate::icd::{BusDomMessage, BusDomPayload};
     use byte_slab::ManagedArcSlab;
@@ -40,17 +42,21 @@ pub mod discover {
         pub async fn poll(&mut self) -> ! {
             let timer = R::default();
             loop {
-                async_sleep_millis::<R>(timer.get_ticks(), 5000u32).await;
+                async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
 
                 match self.poll_inner().await {
+                    Ok(0) => {
+                        async_sleep_millis::<R>(timer.get_ticks(), 2000u32).await;
+                    }
                     Ok(_) => println!("Poll good!"),
                     Err(_) => println!("Poll bad!"),
                 }
             }
         }
 
-        pub async fn poll_inner(&mut self) -> Result<(), ()> {
+        pub async fn poll_inner(&mut self) -> Result<usize, ()> {
             let avail_addrs = { self.mutex.lock_table().await.reserve_all_addrs() };
+            let timer = R::default();
 
             if avail_addrs.is_empty() {
                 return Err(());
@@ -58,10 +64,71 @@ pub mod discover {
 
             // Broadcast initial
             let readies = self.broadcast_initial(&avail_addrs).await?;
+            if readies.is_empty() {
+                return Ok(0);
+            }
             println!("READIES: {:?}", readies);
-            // TODO!
 
-            Ok(())
+            async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
+            let steadies = self.ping_readies(&readies).await?;
+            println!("STEADIES: {:?}", steadies);
+            if steadies.is_empty() {
+                return Ok(0);
+            }
+
+            async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
+            let gos = self.ping_readies(&steadies).await?;
+            println!("GOs: {:?}", gos);
+
+            let mut table = self.mutex.lock_table().await;
+            gos.iter()
+                .try_for_each(|g| table.commit_reserved_addr(*g))?;
+
+            Ok(gos.len())
+        }
+
+        pub async fn ping_readies(&mut self, readies: &[u8]) -> Result<Vec<u8, 32>, ()> {
+            let mut bus = self.mutex.lock_bus().await;
+            let dom_random = self.rand.gen();
+            let timer = R::default();
+            let mut results = Vec::new();
+
+            'outer: for ready in readies {
+                let mut got = false;
+                let payload = BusDomPayload::PingReq { random: dom_random, min_wait_us: 1_000, max_wait_us: 10_000 };
+                let msg = BusDomMessage {
+                    src: RefAddr::local_dom_addr(),
+                    dst: RefAddr::from_local_addr(*ready),
+                    payload,
+                };
+                bus.send_blocking(msg).map_err(drop)?;
+                let start = timer.get_ticks();
+
+                'inner: loop {
+                    let maybe_msg =
+                        super::receive_timeout_micros::<T, R>(bus.deref_mut(), start, 20_000u32).await;
+
+                    let msg = match maybe_msg {
+                        Some(msg) => msg,
+                        None => break 'inner,
+                    };
+
+                    if msg.validate_ping_ack(dom_random).is_ok() {
+                        if got {
+                            continue 'outer;
+                        } else {
+                            got = true;
+                        }
+                    }
+                }
+
+                if got {
+                    println!("yey!!!: {}", ready);
+                    results.push(*ready).map_err(drop)?;
+                }
+            }
+
+            Ok(results)
         }
 
         pub async fn broadcast_initial(&mut self, avail_addrs: &[u8]) -> Result<Vec<u8, 32>, ()> {
@@ -306,7 +373,7 @@ impl AddrTable32 {
 
         let mask = 1 << (addr - 1);
 
-        if (self.reserved & mask) != 0 {
+        if (self.reserved & mask) == 0 {
             return Err(());
         }
 
@@ -322,8 +389,7 @@ impl AddrTable32 {
         }
 
         let mask = 1 << (addr - 1);
-
-        if (self.reserved & mask) != 0 {
+        if (self.reserved & mask) == 0 {
             return Err(());
         }
 
