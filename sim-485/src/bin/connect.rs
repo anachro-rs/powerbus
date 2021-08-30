@@ -1,9 +1,8 @@
-use std::ops::{Deref, DerefMut};
-use std::thread::{sleep, spawn};
-use std::time::Duration;
-use sim_485::{Rs485Bus, Rs485Device};
-use sim_485::groundhog_sim::GlobalRollingTimer;
+use std::{iter::FromIterator, sync::Arc, thread::{JoinHandle, sleep, spawn}, time::Duration};
+
+use sim_485::{Rs485Bus, Rs485Device, groundhog_sim::GlobalRollingTimer};
 use anachro_485::{
+    icd::{TOTAL_SLABS, SLAB_SIZE},
     dom::{
         discover::Discovery as DomDiscovery,
         DomInterface,
@@ -16,12 +15,10 @@ use anachro_485::{
         AsyncSubMutex,
     },
 };
-use byte_slab::BSlab;
-// use postcard
 
+use byte_slab::BSlab;
 use cassette::{Cassette, pin_mut};
 use rand::thread_rng;
-use anachro_485::icd::{TOTAL_SLABS, SLAB_SIZE};
 
 static SLAB: BSlab<TOTAL_SLABS, SLAB_SIZE> = BSlab::new();
 
@@ -29,44 +26,74 @@ fn main() {
     SLAB.init().unwrap();
     let arc_bus = Rs485Bus::new_arc();
 
+    let mut handles = Vec::from_iter([
+        make_me_a_dom(&arc_bus),
+
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+    ]);
+
+    handles.drain(..).for_each(|h| {
+        let _ = h.join();
+    });
+}
+
+fn make_me_a_dom(arc_bus: &Arc<Rs485Bus>) -> JoinHandle<()> {
     let dev_1 = Rs485Device::new(&arc_bus);
 
-    let mut dev_2 = Rs485Device::new(&arc_bus);
-    let mut dev_3 = Rs485Device::new(&arc_bus);
-    let mut dev_4 = Rs485Device::new(&arc_bus);
-    let mut dev_5 = Rs485Device::new(&arc_bus);
+    spawn(move || {
+        let dom = DummyDom { dev: dev_1, carry: vec![] };
+        let dom_mtx = AsyncDomMutex::new(dom);
+        let dom_mtx_2 = dom_mtx.clone();
 
+
+        let mut dom_disco: DomDiscovery<GlobalRollingTimer, DummyDom, _> = DomDiscovery::new(dom_mtx, thread_rng());
+        let dom_disco_future = dom_disco.poll();
+        pin_mut!(dom_disco_future);
+
+        let mut dom_ping: DomPing<GlobalRollingTimer, DummyDom, _> = DomPing::new(dom_mtx_2, thread_rng());
+        let dom_ping_future = dom_ping.poll();
+        pin_mut!(dom_ping_future);
+
+        let mut cas_dom = Cassette::new(dom_disco_future);
+        let mut cas_dom_2 = Cassette::new(dom_ping_future);
+
+        loop {
+            // Check the actual tasks
+            cas_dom.poll_on();
+            cas_dom_2.poll_on();
+
+            // Rate limiting
+            sleep(Duration::from_micros(500));
+        }
+    })
+}
+
+fn make_me_a_sub(arc_bus: &Arc<Rs485Bus>) -> JoinHandle<()> {
+    let mut dev_2 = Rs485Device::new(arc_bus);
     dev_2.enable_listen();
-    dev_3.enable_listen();
-    dev_4.enable_listen();
-    dev_5.enable_listen();
 
+    spawn(move || {
+        let sub_1 = DummySub { dev: dev_2, carry: vec![] };
+        let sub_mtx_1 = AsyncSubMutex::new(sub_1);
 
-    let dom = DummyDom { dev: dev_1, carry: vec![] };
-    let dom_mtx = AsyncDomMutex::new(dom);
-    let dom_mtx_2 = dom_mtx.clone();
-
-    let sub_1 = DummySub { dev: dev_2, carry: vec![] };
-    let sub_mtx_1 = AsyncSubMutex::new(sub_1);
-    let sub_2 = DummySub { dev: dev_3, carry: vec![] };
-    let sub_mtx_2 = AsyncSubMutex::new(sub_2);
-    let sub_3 = DummySub { dev: dev_4, carry: vec![] };
-    let sub_mtx_3 = AsyncSubMutex::new(sub_3);
-    let sub_4 = DummySub { dev: dev_5, carry: vec![] };
-    let sub_mtx_4 = AsyncSubMutex::new(sub_4);
-
-    let mut dom_disco: DomDiscovery<GlobalRollingTimer, DummyDom, _> = DomDiscovery::new(dom_mtx, thread_rng());
-    let dom_disco_future = dom_disco.poll();
-    pin_mut!(dom_disco_future);
-
-    let mut dom_ping: DomPing<GlobalRollingTimer, DummyDom, _> = DomPing::new(dom_mtx_2, thread_rng());
-    let dom_ping_future = dom_ping.poll();
-    pin_mut!(dom_ping_future);
-
-    let mut cas_dom = Cassette::new(dom_disco_future);
-    let mut cas_dom_2 = Cassette::new(dom_ping_future);
-
-    let sub_1_hdl = spawn(move || {
         let mut sub_disco_1: SubDiscovery<GlobalRollingTimer, DummySub, _> = SubDiscovery::new(sub_mtx_1, thread_rng());
         let sub_disco_future_1 = sub_disco_1.obtain_addr();
         pin_mut!(sub_disco_future_1);
@@ -89,93 +116,7 @@ fn main() {
             // Rate limiting
             sleep(Duration::from_micros(500));
         }
-    });
-
-    let sub_2_hdl = spawn(move || {
-        let mut sub_disco_2: SubDiscovery<GlobalRollingTimer, DummySub, _> = SubDiscovery::new(sub_mtx_2, thread_rng());
-        let sub_disco_future_2 = sub_disco_2.obtain_addr();
-        pin_mut!(sub_disco_future_2);
-
-        let mut cas_sub_2 = Cassette::new(sub_disco_future_2);
-
-        let mut cas_sub_2_done = false;
-
-        loop {
-            if !cas_sub_2_done {
-                if let Some(x) = cas_sub_2.poll_on() {
-                    match x {
-                        Ok(y) => {
-                            cas_sub_2_done = true;
-                            println!("cas_sub_2 addr: {:?}", y);
-                        }
-                        Err(e) => panic!("err! {:?}", e),
-                    }
-                }
-            }
-
-            // Rate limiting
-            sleep(Duration::from_micros(500));
-        }
-    });
-
-    let sub_3_hdl = spawn(move || {
-        let mut sub_disco_3: SubDiscovery<GlobalRollingTimer, DummySub, _> = SubDiscovery::new(sub_mtx_3, thread_rng());
-        let sub_disco_future_3 = sub_disco_3.obtain_addr();
-        pin_mut!(sub_disco_future_3);
-        let mut cas_sub_3 = Cassette::new(sub_disco_future_3);
-        let mut cas_sub_3_done = false;
-
-        loop {
-            if !cas_sub_3_done {
-                if let Some(x) = cas_sub_3.poll_on() {
-                    match x {
-                        Ok(y) => {
-                            cas_sub_3_done = true;
-                            println!("cas_sub_3 addr: {:?}", y);
-                        }
-                        Err(e) => panic!("err! {:?}", e),
-                    }
-                }
-            }
-
-            // Rate limiting
-            sleep(Duration::from_micros(500));
-        }
-    });
-
-    let sub_4_hdl = spawn(move || {
-        let mut sub_disco_4: SubDiscovery<GlobalRollingTimer, DummySub, _> = SubDiscovery::new(sub_mtx_4, thread_rng());
-        let sub_disco_future_4 = sub_disco_4.obtain_addr();
-        pin_mut!(sub_disco_future_4);
-        let mut cas_sub_4 = Cassette::new(sub_disco_future_4);
-        let mut cas_sub_4_done = false;
-
-        loop {
-            if !cas_sub_4_done {
-                if let Some(x) = cas_sub_4.poll_on() {
-                    match x {
-                        Ok(y) => {
-                            cas_sub_4_done = true;
-                            println!("cas_sub_4 addr: {:?}", y);
-                        }
-                        Err(e) => panic!("err! {:?}", e),
-                    }
-                }
-            }
-
-            // Rate limiting
-            sleep(Duration::from_micros(500));
-        }
-    });
-
-    loop {
-        // Check the actual tasks
-        cas_dom.poll_on();
-        cas_dom_2.poll_on();
-
-        // Rate limiting
-        sleep(Duration::from_micros(500));
-    }
+    })
 }
 
 struct DummyDom {

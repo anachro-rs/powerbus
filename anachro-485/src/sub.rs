@@ -69,6 +69,10 @@ pub mod discover {
                 return Ok(None)
             };
 
+            if self.rand.gen_range(0..8) != 0 {
+                return Ok(None);
+            }
+
             async_sleep_micros::<R>(timer.get_ticks(), delay).await;
             bus.send_blocking(resp).map_err(drop)?;
 
