@@ -8,6 +8,7 @@ use anachro_485::{
         discover::Discovery as DomDiscovery,
         DomInterface,
         AsyncDomMutex,
+        ping::Ping as DomPing,
     },
     sub::{
         discover::Discovery as SubDiscovery,
@@ -43,6 +44,7 @@ fn main() {
 
     let dom = DummyDom { dev: dev_1, carry: vec![] };
     let dom_mtx = AsyncDomMutex::new(dom);
+    let dom_mtx_2 = dom_mtx.clone();
 
     let sub_1 = DummySub { dev: dev_2, carry: vec![] };
     let sub_mtx_1 = AsyncSubMutex::new(sub_1);
@@ -57,7 +59,12 @@ fn main() {
     let dom_disco_future = dom_disco.poll();
     pin_mut!(dom_disco_future);
 
+    let mut dom_ping: DomPing<GlobalRollingTimer, DummyDom, _> = DomPing::new(dom_mtx_2, thread_rng());
+    let dom_ping_future = dom_ping.poll();
+    pin_mut!(dom_ping_future);
+
     let mut cas_dom = Cassette::new(dom_disco_future);
+    let mut cas_dom_2 = Cassette::new(dom_ping_future);
 
     let sub_1_hdl = spawn(move || {
         let mut sub_disco_1: SubDiscovery<GlobalRollingTimer, DummySub, _> = SubDiscovery::new(sub_mtx_1, thread_rng());
@@ -164,6 +171,7 @@ fn main() {
     loop {
         // Check the actual tasks
         cas_dom.poll_on();
+        cas_dom_2.poll_on();
 
         // Rate limiting
         sleep(Duration::from_micros(500));

@@ -1,10 +1,15 @@
-pub mod discover;
-
 use crate::icd::{BusDomMessage, BusSubMessage};
+
+// TODO: `no_std`
+use std::sync::{Arc, Mutex, MutexGuard};
 use core::task::Poll;
+
+use heapless::Vec;
 use futures::future::poll_fn;
 use groundhog::RollingTimer;
-use std::sync::{Arc, Mutex, MutexGuard};
+
+pub mod discover;
+pub mod ping;
 
 pub trait DomInterface {
     fn send_blocking<'a>(&mut self, msg: BusDomMessage<'a>) -> Result<(), BusDomMessage<'a>>;
@@ -13,13 +18,24 @@ pub trait DomInterface {
 
 // hmmm
 // This will need to look way different in no-std
-#[derive(Clone)]
 pub struct AsyncDomMutex<T>
 where
     T: DomInterface,
 {
     bus: Arc<Mutex<T>>,
     table: Arc<Mutex<AddrTable32>>,
+}
+
+impl<T> Clone for AsyncDomMutex<T>
+where
+    T: DomInterface,
+{
+    fn clone(&self) -> Self {
+        Self {
+            bus: self.bus.clone(),
+            table: self.table.clone(),
+        }
+    }
 }
 
 impl<T> AsyncDomMutex<T>
@@ -74,8 +90,6 @@ where
     })
     .await
 }
-
-use heapless::Vec;
 
 pub struct AddrTable32 {
     available: u32,

@@ -1,14 +1,16 @@
-use super::AsyncDomMutex;
-use super::DomInterface;
-use crate::async_sleep_millis;
-use crate::dom;
-use crate::icd::BusSubPayload;
-use crate::icd::RefAddr;
-use crate::icd::{BusDomMessage, BusDomPayload};
+use crate::{
+    async_sleep_millis,
+    dom::{AsyncDomMutex, DomInterface},
+    icd::{RefAddr, BusDomMessage, BusDomPayload},
+};
+
+use core::{
+    iter::FromIterator,
+    marker::PhantomData,
+    ops::DerefMut,
+};
+
 use byte_slab::ManagedArcSlab;
-use core::iter::FromIterator;
-use core::marker::PhantomData;
-use core::ops::DerefMut;
 use groundhog::RollingTimer;
 use heapless::{FnvIndexMap, FnvIndexSet, Vec};
 use rand::Rng;
