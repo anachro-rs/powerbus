@@ -59,8 +59,9 @@ impl<const N: usize, const SZ: usize> Drop for SlabBox<N, SZ> {
         );
         // TODO: Make debug assert?
         assert!(zero.is_ok());
-        let push = self.slab.alloc_q.enqueue(self.idx);
-        assert!(push.is_ok());
+
+        // TODO: Why is this necessary?
+        while let Err(_) = self.slab.alloc_q.enqueue(self.idx) { }
 
         // TODO: Zero on drop? As option?
     }
@@ -154,8 +155,7 @@ impl<const N: usize, const SZ: usize> Drop for SlabArc<N, SZ> {
 
         // We just dropped the refct to zero. Release the structure
         if refct == 1 {
-            let push = self.slab.alloc_q.enqueue(self.idx);
-            assert!(push.is_ok());
+            while let Err(_) = self.slab.alloc_q.enqueue(self.idx) { }
         }
     }
 }

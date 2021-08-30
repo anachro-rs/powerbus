@@ -86,7 +86,7 @@ impl Rs485Bus {
                     if senders_before_good && senders_after_good {
                         dev.sender.send(*byte).unwrap();
                     } else {
-                        println!("Corrupted byte!");
+                        // println!("Corrupted byte!");
                         dev.sender.send(0xAF).unwrap();
                     }
                 }

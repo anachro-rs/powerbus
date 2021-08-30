@@ -140,8 +140,8 @@ where
 
         let payload = BusDomPayload::DiscoverInitial {
             random: dom_random,
-            min_wait_us: 1_000,
-            max_wait_us: 10_000,
+            min_wait_us: 10_000,
+            max_wait_us: 100_000,
             offers: ManagedArcSlab::from_slice(&avail_addrs),
         };
         let message = BusDomMessage::new(
@@ -158,7 +158,7 @@ where
         // Collect until timeout, or max messages received
         while !resps.is_full() {
             let maybe_msg =
-                super::receive_timeout_micros::<T, R>(bus.deref_mut(), start, 20_000u32).await;
+                super::receive_timeout_micros::<T, R>(bus.deref_mut(), start, 200_000u32).await;
 
             if let Some(msg) = maybe_msg {
                 resps.push(msg).map_err(drop)?;

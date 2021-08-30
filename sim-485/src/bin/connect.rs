@@ -48,6 +48,26 @@ fn main() {
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
+
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+        make_me_a_sub(&arc_bus),
+        // make_me_a_sub(&arc_bus),
     ]);
 
     handles.drain(..).for_each(|h| {
