@@ -26,7 +26,7 @@ fn main() {
     SLAB.init().unwrap();
     let arc_bus = Rs485Bus::new_arc();
 
-    let mut handles = Vec::from_iter([
+    let mut network = Vec::from_iter([
         make_me_a_dom(&arc_bus),
 
         make_me_a_sub(&arc_bus),
@@ -70,7 +70,7 @@ fn main() {
         // make_me_a_sub(&arc_bus),
     ]);
 
-    handles.drain(..).for_each(|h| {
+    network.drain(..).for_each(|h| {
         let _ = h.join();
     });
 }
