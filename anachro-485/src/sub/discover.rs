@@ -65,7 +65,7 @@ where
 
         // TODO: Move the "response percentage" to the dom, let it respond
         // to collisions/etc to decrease
-        if self.rand.gen_range(0..2) != 0 {
+        if self.rand.gen_range(0..4) != 0 {
             return Ok(None);
         }
 

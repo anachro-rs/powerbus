@@ -24,6 +24,7 @@ where
     _timer: PhantomData<R>,
     mutex: AsyncDomMutex<T>,
     rand: A,
+    boost_mode: bool,
 }
 
 impl<R, T, A> Discovery<R, T, A>
@@ -37,17 +38,29 @@ where
             _timer: PhantomData,
             mutex,
             rand,
+            boost_mode: true,
         }
     }
 
     pub async fn poll(&mut self) -> ! {
         let timer = R::default();
+        let start = timer.get_ticks();
+        self.boost_mode = true;
+
         loop {
-            async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
+            if self.boost_mode && timer.millis_since(start) >= 5000 {
+                self.boost_mode = false;
+            }
+
+            if !self.boost_mode {
+                async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
+            }
 
             match self.poll_inner().await {
                 Ok(0) => {
-                    async_sleep_millis::<R>(timer.get_ticks(), 2000u32).await;
+                    if !self.boost_mode {
+                        async_sleep_millis::<R>(timer.get_ticks(), 2000u32).await;
+                    }
                 }
                 Ok(_) => println!("Poll good!"),
                 Err(_) => println!("Poll bad!"),
@@ -70,14 +83,20 @@ where
         }
         println!("READIES: {:?}", readies);
 
-        async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
+        if !self.boost_mode {
+            async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
+        }
+
         let steadies = self.ping_readies(&readies).await?;
         println!("STEADIES: {:?}", steadies);
         if steadies.is_empty() {
             return Ok(0);
         }
 
-        async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
+        if !self.boost_mode {
+            async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
+        }
+
         let gos = self.ping_readies(&steadies).await?;
         println!("GOs: {:?}", gos);
 
