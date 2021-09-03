@@ -1,11 +1,13 @@
-use std::{marker::PhantomData, ops::DerefMut};
+use core::{marker::PhantomData, ops::DerefMut};
 
 use groundhog::RollingTimer;
 use rand::Rng;
 
-use crate::{async_sleep_micros, icd::BusSubMessage};
-
-use super::{AsyncSubMutex, SubInterface};
+use crate::{
+    async_sleep_micros,
+    icd::BusSubMessage,
+    sub::{AsyncSubMutex, SubInterface},
+};
 
 pub struct Discovery<R, T, A>
 where
@@ -17,7 +19,6 @@ where
     mutex: AsyncSubMutex<T>,
     rand: A,
 }
-
 
 impl<R, T, A> Discovery<R, T, A>
 where
@@ -51,16 +52,20 @@ where
         let msg = match super::receive_timeout_micros::<T, R>(
             bus.deref_mut(),
             timer.get_ticks(),
-            1_000_000
-        ).await {
+            1_000_000,
+        )
+        .await
+        {
             Some(msg) => msg,
             None => return Ok(None),
         };
 
-        let (addr, sub_random, delay, resp) = if let Some((addr, sub_random, delay, resp)) = BusSubMessage::generate_discover_ack(&mut self.rand, msg) {
+        let (addr, sub_random, delay, resp) = if let Some((addr, sub_random, delay, resp)) =
+            BusSubMessage::generate_discover_ack(&mut self.rand, msg)
+        {
             (addr, sub_random, delay, resp)
         } else {
-            return Ok(None)
+            return Ok(None);
         };
 
         // TODO: Move the "response percentage" to the dom, let it respond
@@ -74,11 +79,9 @@ where
 
         let start = timer.get_ticks();
         loop {
-            let msg = match super::receive_timeout_micros::<T, R>(
-                bus.deref_mut(),
-                start,
-                250_000,
-            ).await {
+            let msg = match super::receive_timeout_micros::<T, R>(bus.deref_mut(), start, 250_000)
+                .await
+            {
                 Some(msg) => msg,
                 None => return Ok(None),
             };
@@ -87,7 +90,7 @@ where
                 Ok(new_addr) if new_addr == addr => {
                     println!("yey");
                     break;
-                },
+                }
                 Ok(_) => println!("wtf?"),
                 Err(_) => println!("ohno"),
             }
@@ -97,17 +100,16 @@ where
         let mut success_ct = 0;
 
         loop {
-            let msg = match super::receive_timeout_micros::<T, R>(
-                bus.deref_mut(),
-                start,
-                5_000_000,
-            ).await {
+            let msg = match super::receive_timeout_micros::<T, R>(bus.deref_mut(), start, 5_000_000)
+                .await
+            {
                 Some(msg) => msg,
                 None => return Ok(None),
             };
 
             let j_start = timer.get_ticks();
-            if let Some((jitter, msg)) = BusSubMessage::generate_ping_ack(&mut self.rand, addr, msg) {
+            if let Some((jitter, msg)) = BusSubMessage::generate_ping_ack(&mut self.rand, addr, msg)
+            {
                 async_sleep_micros::<R>(j_start, jitter).await;
 
                 bus.send_blocking(msg).map_err(drop)?;

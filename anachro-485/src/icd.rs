@@ -10,17 +10,43 @@ pub const MAX_ADDR_SEGMENTS: usize = 8;
 pub const TOTAL_SLABS: usize = 128;
 pub const SLAB_SIZE: usize = 512;
 
+// Reserved addrs
+pub const LOCAL_DOM_ADDR: u8 = 0;
+pub const LOCAL_BROADCAST_ADDR: u8 = 255;
+
+pub const LOCAL_ADDR_LEN: usize = 1;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AddrPort {
+    pub(crate) addr: VecAddr,
+    pub(crate) port: u16,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LineHeader {
+    pub(crate) src: AddrPort,
+    pub(crate) dst: AddrPort,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LineMessage<'a> {
+    pub(crate) hdr: LineHeader,
+
+    #[serde(borrow)]
+    pub(crate) msg: ManagedArcSlab<'a, TOTAL_SLABS, SLAB_SIZE>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BusDomMessage<'a> {
-    pub src: RefAddr,
-    pub dst: RefAddr,
+    pub src: VecAddr,
+    pub dst: VecAddr,
 
     #[serde(borrow)]
     pub payload: BusDomPayload<'a>,
 }
 
 impl<'a> BusDomMessage<'a> {
-    pub fn new(src: RefAddr, dst: RefAddr, payload: BusDomPayload<'a>) -> Self {
+    pub fn new(src: VecAddr, dst: VecAddr, payload: BusDomPayload<'a>) -> Self {
         Self { src, dst, payload }
     }
 
@@ -64,7 +90,15 @@ impl<'a> BusDomMessage<'a> {
                 rx_bytes_avail,
                 max_grant_us,
             },
-            BusDomPayload::PingReq { random, min_wait_us, max_wait_us } => BusDomPayload::PingReq { random, min_wait_us, max_wait_us },
+            BusDomPayload::PingReq {
+                random,
+                min_wait_us,
+                max_wait_us,
+            } => BusDomPayload::PingReq {
+                random,
+                min_wait_us,
+                max_wait_us,
+            },
         };
 
         Some(BusDomMessage { src, dst, payload })
@@ -73,8 +107,8 @@ impl<'a> BusDomMessage<'a> {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BusSubMessage<'a> {
-    pub src: RefAddr,
-    pub dst: RefAddr,
+    pub src: VecAddr,
+    pub dst: VecAddr,
 
     #[serde(borrow)]
     pub payload: BusSubPayload<'a>,
@@ -83,7 +117,6 @@ pub struct BusSubMessage<'a> {
 impl<'a> BusSubMessage<'a> {
     pub fn reroot(self, arc: &SlabArc<TOTAL_SLABS, SLAB_SIZE>) -> Option<BusSubMessage<'static>> {
         let BusSubMessage { src, dst, payload } = self;
-
 
         // See https://github.com/rust-lang/rust/issues/88423 for why we need to
         // be so verbose here.
@@ -106,18 +139,24 @@ impl<'a> BusSubMessage<'a> {
                 rx_bytes_avail,
             },
             BusSubPayload::BusGrantRelease => BusSubPayload::BusGrantRelease,
-            BusSubPayload::PingAck { own_id_checksum, own_random } => BusSubPayload::PingAck { own_id_checksum, own_random },
+            BusSubPayload::PingAck {
+                own_id_checksum,
+                own_random,
+            } => BusSubPayload::PingAck {
+                own_id_checksum,
+                own_random,
+            },
         };
         Some(BusSubMessage { src, dst, payload })
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RefAddr {
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VecAddr {
     bytes: Vec<u8, MAX_ADDR_SEGMENTS>,
 }
 
-impl RefAddr {
+impl VecAddr {
     pub fn from_addrs(bytes: &[u8]) -> Result<Self, ()> {
         Vec::from_slice(bytes).map(|v| Self { bytes: v })
     }
@@ -130,18 +169,18 @@ impl RefAddr {
 
     pub fn local_dom_addr() -> Self {
         let mut vec = Vec::new();
-        vec.push(0x00).ok();
+        vec.push(LOCAL_DOM_ADDR).ok();
         Self { bytes: vec }
     }
 
     pub fn local_broadcast_addr() -> Self {
         let mut vec = Vec::new();
-        vec.push(0xFF).ok();
+        vec.push(LOCAL_BROADCAST_ADDR).ok();
         Self { bytes: vec }
     }
 
     pub fn get_exact_local_addr(&self) -> Option<u8> {
-        if self.bytes.len() != 1 {
+        if self.bytes.len() != LOCAL_ADDR_LEN {
             // Not a local addr, has a chain
             return None;
         }
@@ -203,10 +242,14 @@ pub enum BusSubPayload<'a> {
 }
 
 impl<'a> BusDomMessage<'a> {
-    pub fn generate_discover_ack_ack(addr: u8, dom_random: u32, sub_random: u32) -> BusDomMessage<'static> {
-        BusDomMessage{
-            src: RefAddr::local_dom_addr(),
-            dst: RefAddr::from_local_addr(addr),
+    pub fn generate_discover_ack_ack(
+        addr: u8,
+        dom_random: u32,
+        sub_random: u32,
+    ) -> BusDomMessage<'static> {
+        BusDomMessage {
+            src: VecAddr::local_dom_addr(),
+            dst: VecAddr::from_local_addr(addr),
             payload: BusDomPayload::DiscoverAckAck {
                 own_id: addr,
                 own_random: dom_random,
@@ -219,7 +262,12 @@ impl<'a> BusDomMessage<'a> {
         let src_addr = self.src.get_exact_local_addr().ok_or(())?;
         let dst_addr = self.dst.get_exact_local_addr().ok_or(())?;
 
-        if let BusDomPayload::DiscoverAckAck { own_id, own_random, own_id_ownrand_checksum } = self.payload {
+        if let BusDomPayload::DiscoverAckAck {
+            own_id,
+            own_random,
+            own_id_ownrand_checksum,
+        } = self.payload
+        {
             if (dst_addr != own_id) || (src_addr != 0) {
                 return Err(());
             }
@@ -237,7 +285,11 @@ impl<'a> BusDomMessage<'a> {
 }
 
 impl<'a> BusSubMessage<'a> {
-    pub fn generate_ping_ack<R: Rng>(rng: &mut R, own_addr: u8, dom: BusDomMessage) -> Option<(u32, BusSubMessage<'static>)> {
+    pub fn generate_ping_ack<R: Rng>(
+        rng: &mut R,
+        own_addr: u8,
+        dom: BusDomMessage,
+    ) -> Option<(u32, BusSubMessage<'static>)> {
         let src = dom.src.get_exact_local_addr()?;
         let dst = dom.dst.get_exact_local_addr()?;
 
@@ -245,24 +297,35 @@ impl<'a> BusSubMessage<'a> {
             return None;
         }
 
-        if let BusDomPayload::PingReq { random, min_wait_us, max_wait_us } = dom.payload {
+        if let BusDomPayload::PingReq {
+            random,
+            min_wait_us,
+            max_wait_us,
+        } = dom.payload
+        {
             let rand = rng.gen();
             let jitter = rng.gen_range(min_wait_us..max_wait_us);
 
-            Some((jitter, BusSubMessage {
-                src: RefAddr::from_local_addr(own_addr),
-                dst: RefAddr::local_dom_addr(),
-                payload: BusSubPayload::PingAck {
-                    own_id_checksum: checksum_addr_random(own_addr, random, rand),
-                    own_random: rand,
-                }
-            }))
+            Some((
+                jitter,
+                BusSubMessage {
+                    src: VecAddr::from_local_addr(own_addr),
+                    dst: VecAddr::local_dom_addr(),
+                    payload: BusSubPayload::PingAck {
+                        own_id_checksum: checksum_addr_random(own_addr, random, rand),
+                        own_random: rand,
+                    },
+                },
+            ))
         } else {
             None
         }
     }
 
-    pub fn generate_discover_ack<R: Rng>(rng: &mut R, dom: BusDomMessage) -> Option<(u8, u32, u32, BusSubMessage<'static>)> {
+    pub fn generate_discover_ack<R: Rng>(
+        rng: &mut R,
+        dom: BusDomMessage,
+    ) -> Option<(u8, u32, u32, BusSubMessage<'static>)> {
         let src = dom.src.get_exact_local_addr()?;
         let dst = dom.dst.get_exact_local_addr()?;
 
@@ -270,21 +333,32 @@ impl<'a> BusSubMessage<'a> {
             return None;
         }
 
-        if let BusDomPayload::DiscoverInitial { random, min_wait_us, max_wait_us, offers } = dom.payload {
+        if let BusDomPayload::DiscoverInitial {
+            random,
+            min_wait_us,
+            max_wait_us,
+            offers,
+        } = dom.payload
+        {
             let delay = rng.gen_range(min_wait_us..max_wait_us);
             let addr_idx = rng.gen_range(0..offers.len());
             let addr = *offers.get(addr_idx)?;
             let sub_random = rng.gen();
 
-            Some((addr, sub_random, delay, BusSubMessage {
-                dst: RefAddr::local_dom_addr(),
-                src: RefAddr::from_local_addr(addr),
-                payload: BusSubPayload::DiscoverAck {
-                    own_id: addr,
-                    own_random: sub_random,
-                    own_id_rand_checksum: checksum_addr_random(addr, random, sub_random),
-                }
-            }))
+            Some((
+                addr,
+                sub_random,
+                delay,
+                BusSubMessage {
+                    dst: VecAddr::local_dom_addr(),
+                    src: VecAddr::from_local_addr(addr),
+                    payload: BusSubPayload::DiscoverAck {
+                        own_id: addr,
+                        own_random: sub_random,
+                        own_id_rand_checksum: checksum_addr_random(addr, random, sub_random),
+                    },
+                },
+            ))
         } else {
             None
         }
@@ -294,7 +368,12 @@ impl<'a> BusSubMessage<'a> {
         // Messages must come from the local bus
         let addr = self.src.get_exact_local_addr().ok_or(())?;
 
-        if let BusSubPayload::DiscoverAck { own_id, own_id_rand_checksum, own_random } = self.payload {
+        if let BusSubPayload::DiscoverAck {
+            own_id,
+            own_id_rand_checksum,
+            own_random,
+        } = self.payload
+        {
             // Source address must match claim address
             if own_id != addr {
                 println!("BAD ADDR");
@@ -320,7 +399,11 @@ impl<'a> BusSubMessage<'a> {
         // Messages must come from the local bus
         let addr = self.src.get_exact_local_addr().ok_or(())?;
 
-        if let BusSubPayload::PingAck { own_id_checksum, own_random } = self.payload {
+        if let BusSubPayload::PingAck {
+            own_id_checksum,
+            own_random,
+        } = self.payload
+        {
             // Terrible checksum!
             let result = checksum_addr_random(addr, dom_random, own_random);
 

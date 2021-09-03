@@ -1,7 +1,7 @@
 use crate::{
     async_sleep_millis,
     dom::{AsyncDomMutex, DomInterface},
-    icd::{RefAddr, BusDomMessage, BusDomPayload},
+    icd::{VecAddr, BusDomMessage, BusDomPayload},
 };
 
 use core::{
@@ -117,8 +117,8 @@ where
             let mut got = false;
             let payload = BusDomPayload::PingReq { random: dom_random, min_wait_us: 1_000, max_wait_us: 10_000 };
             let msg = BusDomMessage {
-                src: RefAddr::local_dom_addr(),
-                dst: RefAddr::from_local_addr(*ready),
+                src: VecAddr::local_dom_addr(),
+                dst: VecAddr::from_local_addr(*ready),
                 payload,
             };
             bus.send_blocking(msg).map_err(drop)?;
@@ -164,8 +164,8 @@ where
             offers: ManagedArcSlab::from_slice(&avail_addrs),
         };
         let message = BusDomMessage::new(
-            RefAddr::local_dom_addr(),
-            RefAddr::local_broadcast_addr(),
+            VecAddr::local_dom_addr(),
+            VecAddr::local_broadcast_addr(),
             payload,
         );
         bus.send_blocking(message).unwrap();

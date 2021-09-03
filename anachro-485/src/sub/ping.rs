@@ -1,9 +1,13 @@
+#![allow(unused_imports)]
+
+use crate::{
+    icd::{BusDomMessage, BusDomPayload, VecAddr},
+    sub::{AsyncSubMutex, SubInterface},
+};
 use core::marker::PhantomData;
-use std::ops::DerefMut;
 use groundhog::RollingTimer;
 use rand::Rng;
-use crate::{async_sleep_millis, sub::{SubInterface, AsyncSubMutex}, icd::{BusDomMessage, BusDomPayload, RefAddr}};
-
+use std::ops::DerefMut;
 
 pub struct Ping<R, T, A>
 where
@@ -12,6 +16,6 @@ where
     A: Rng,
 {
     _timer: PhantomData<R>,
-    mutex: AsyncSubMutex<T>,
-    rand: A,
+    _mutex: AsyncSubMutex<T>,
+    _rand: A,
 }

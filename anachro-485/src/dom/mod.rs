@@ -1,12 +1,14 @@
 use crate::icd::{BusDomMessage, BusSubMessage};
 
 // TODO: `no_std`
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::Arc;
+
 use core::task::Poll;
 
-use heapless::Vec;
 use futures::future::poll_fn;
 use groundhog::RollingTimer;
+use heapless::Vec;
+use spin::{Mutex, MutexGuard};
 
 pub mod discover;
 pub mod ping;
@@ -52,8 +54,8 @@ where
     // TODO: Custom type also with DerefMut
     pub async fn lock_bus(&self) -> MutexGuard<'_, T> {
         poll_fn(|_| match self.bus.try_lock() {
-            Ok(mg) => Poll::Ready(mg),
-            Err(_) => Poll::Pending,
+            Some(mg) => Poll::Ready(mg),
+            None => Poll::Pending,
         })
         .await
     }
@@ -61,8 +63,8 @@ where
     // TODO: Custom type also with DerefMut
     pub async fn lock_table(&self) -> MutexGuard<'_, AddrTable32> {
         poll_fn(|_| match self.table.try_lock() {
-            Ok(mg) => Poll::Ready(mg),
-            Err(_) => Poll::Pending,
+            Some(mg) => Poll::Ready(mg),
+            None => Poll::Pending,
         })
         .await
     }

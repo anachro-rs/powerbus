@@ -1,7 +1,10 @@
-use std::{sync::{Arc, Mutex, MutexGuard}, task::Poll};
+use std::sync::Arc;
+
 use crate::icd::{BusDomMessage, BusSubMessage};
+use core::task::Poll;
 use futures::future::poll_fn;
 use groundhog::RollingTimer;
+use spin::{Mutex, MutexGuard};
 
 pub mod discover;
 pub mod ping;
@@ -33,12 +36,11 @@ where
 
     // TODO: Custom type also with DerefMut
     pub async fn lock_bus(&self) -> MutexGuard<'_, T> {
-        poll_fn(|_| {
-            match self.bus.try_lock() {
-                Ok(mg) => Poll::Ready(mg),
-                Err(_) => Poll::Pending
-            }
-        }).await
+        poll_fn(|_| match self.bus.try_lock() {
+            Some(mg) => Poll::Ready(mg),
+            None => Poll::Pending,
+        })
+        .await
     }
 }
 
@@ -58,8 +60,9 @@ where
         } else {
             match interface.pop() {
                 m @ Some(_) => Poll::Ready(m),
-                _ => Poll::Pending
+                _ => Poll::Pending,
             }
         }
-    }).await
+    })
+    .await
 }

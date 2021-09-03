@@ -1,8 +1,11 @@
-use core::marker::PhantomData;
-use std::ops::DerefMut;
+use crate::{
+    async_sleep_millis,
+    dom::{AsyncDomMutex, DomInterface},
+    icd::{BusDomMessage, BusDomPayload, VecAddr},
+};
+use core::{marker::PhantomData, ops::DerefMut};
 use groundhog::RollingTimer;
 use rand::Rng;
-use crate::{async_sleep_millis, dom::{DomInterface, AsyncDomMutex}, icd::{BusDomMessage, BusDomPayload, RefAddr}};
 
 pub struct Ping<R, T, A>
 where
@@ -14,7 +17,6 @@ where
     mutex: AsyncDomMutex<T>,
     rand: A,
 }
-
 
 impl<R, T, A> Ping<R, T, A>
 where
@@ -55,12 +57,12 @@ where
                 max_wait_us: 0,
             };
             let msg = BusDomMessage {
-                src: RefAddr::local_dom_addr(),
-                dst: RefAddr::from_local_addr(choice),
+                src: VecAddr::local_dom_addr(),
+                dst: VecAddr::from_local_addr(choice),
                 payload,
             };
             match bus.send_blocking(msg) {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(_) => continue,
             }
 

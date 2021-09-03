@@ -1,8 +1,9 @@
 // Okay, what do we have here. Let's get back to layers:
 
+pub mod dom;
 pub mod icd;
 pub mod sub;
-pub mod dom;
+pub mod dispatch;
 
 use groundhog::{self, RollingTimer};
 
@@ -33,7 +34,8 @@ where
         } else {
             Poll::Pending
         }
-    }).await;
+    })
+    .await;
 }
 
 // TODO: This should probably live in groundhog
@@ -49,5 +51,7 @@ where
         } else {
             Poll::Pending
         }
-    }).await;
+    })
+    .await;
 }
+
