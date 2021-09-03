@@ -62,6 +62,13 @@ impl IoQueue {
     }
 }
 
+/// Message dispatch and routing
+///
+/// NOTE: This struct intentionally has NO way to de-allocate ports
+/// that have been assigned. It has not (yet) been designed with
+/// the ability to deprovision correctly, and is intended for all ports
+/// to be assigned once, from a single thread, at the top of the
+/// program. All other uses beware (for now)
 pub struct Dispatch<const PORTS: usize> {
     ports: [PortQueue; PORTS],
     ioq: &'static IoQueue,
@@ -105,11 +112,26 @@ impl<const PORTS: usize> Dispatch<PORTS> {
         }
     }
 
+    /// Register a port, and receive a socket for the corresponding port.
+    /// It will return None if:
+    ///
+    /// * The requested port is zero (not allowed)
+    /// * We have already allocated the maximum number of port (e.g. `PORTS`)
+    /// * The request port has already been allocated
     pub fn register_port<'a>(&'a self, port: u16) -> Option<DispatchSocket<'a>> {
         // Is the user requesting a valid (non-zero) port?
         let nzport = NonZeroU16::new(port)?;
 
         // Has this port already been allocated?
+        //
+        // TODO: This could be racy with the next section! For now,
+        // I only plan to do this in a single threaded fashion, but this
+        // COULD allow for two tasks to define the same port, in which
+        // case the latter port would always be starved. This isn't
+        // unsafe, but is undesirable
+        //
+        // This could be prevented with a "doing management" mutex/spinlock,
+        // for now: buyer beware
         if self.ports.iter().any(|p| p.port.load(SeqCst) == port) {
             return None;
         }
@@ -117,11 +139,11 @@ impl<const PORTS: usize> Dispatch<PORTS> {
         // Try to find a free port.
         self.ports
             .iter()
-            .find(|p| p.port.load(SeqCst) == INVALID_PORT)
+            .find(|p| {
+                // Find/Allocate the slot
+                p.port.compare_exchange(INVALID_PORT, port, SeqCst, SeqCst).is_ok()
+            })
             .map(|slot| {
-                // Allocate the slot
-                slot.port.store(port, SeqCst);
-
                 // Return an allocated slot
                 DispatchSocket {
                     port: nzport,
