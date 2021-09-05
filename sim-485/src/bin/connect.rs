@@ -1,26 +1,19 @@
 use std::{iter::FromIterator, sync::Arc, thread::{JoinHandle, sleep, spawn}, time::Duration};
 
 use sim_485::{Rs485Bus, Rs485Device, groundhog_sim::GlobalRollingTimer};
-use anachro_485::{
-    icd::{TOTAL_SLABS, SLAB_SIZE},
-    dom::{
-        discover::Discovery as DomDiscovery,
-        DomInterface,
-        AsyncDomMutex,
-        ping::Ping as DomPing,
-    },
-    sub::{
+use anachro_485::{declare_dom, dispatch::{Dispatch, IoQueue}, dom::{AsyncDomMutex, DomHandle, DomInterface, discover::Discovery as DomDiscovery, ping::Ping as DomPing}, icd::{TOTAL_SLABS, SLAB_SIZE}, sub::{
         discover::Discovery as SubDiscovery,
         SubInterface,
         AsyncSubMutex,
-    },
-};
+    }};
 
 use byte_slab::BSlab;
 use cassette::{Cassette, pin_mut};
 use rand::thread_rng;
 
 static SLAB: BSlab<TOTAL_SLABS, SLAB_SIZE> = BSlab::new();
+static IOQ: IoQueue = IoQueue::new();
+static DISPATCH: Dispatch<8> = Dispatch::new(&IOQ, &SLAB);
 
 fn main() {
     SLAB.init().unwrap();
@@ -69,6 +62,29 @@ fn main() {
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
     ]);
+
+    let dev_1 = Rs485Device::new(&arc_bus);
+
+    let dom = DummyDom { dev: dev_1, carry: vec![] };
+    let dom_mtx = AsyncDomMutex::new(dom);
+    let dom_mtx_2 = dom_mtx.clone();
+
+
+    let mut dom_disco: DomDiscovery<GlobalRollingTimer, DummyDom, _> = DomDiscovery::new(dom_mtx, thread_rng());
+    let dom_disco_future = dom_disco.poll();
+    pin_mut!(dom_disco_future);
+
+    let mut hdl = DomHandle::new(&DISPATCH, dom_disco_future).unwrap();
+
+    declare_dom!({
+        name: boop,
+        dispatch: DISPATCH,
+    });
+
+    for _ in 0..10 {
+        hdl.poll();
+        boop.poll();
+    }
 
     network.drain(..).for_each(|h| {
         let _ = h.join();
