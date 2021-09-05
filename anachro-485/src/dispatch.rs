@@ -4,13 +4,14 @@ use crate::icd::{
 };
 use byte_slab::{BSlab, ManagedArcSlab, SlabBox};
 use cobs::decode_in_place;
+use serde::Serialize;
 use core::{
     num::NonZeroU16,
     ops::DerefMut,
     sync::atomic::{AtomicU16, Ordering::SeqCst},
 };
 use heapless::mpmc::MpMcQueue;
-use postcard::{from_bytes, to_slice_cobs};
+use postcard::{from_bytes, to_slice, to_slice_cobs};
 use std::{ops::Deref, sync::atomic::AtomicU8};
 
 const TASK_QUEUE_DEPTH: usize = 4;
@@ -25,26 +26,48 @@ pub struct TimeStampBox {
     tick: u32,
 }
 
-pub struct TimeStampPacket {
-    pub packet: LocalPacket,
+#[derive(Debug)]
+pub struct LocalHeader {
+    pub src: AddrPort,
+    pub dst: AddrPort,
     pub tick: u32,
 }
 
-#[derive(Debug)]
-pub struct LocalHeader {
-    src: AddrPort,
-    dst: AddrPort,
-    tick: u32,
+pub struct LocalPacket {
+    pub(crate) hdr: LocalHeader,
+    pub(crate) payload: MASlab,
 }
 
-pub struct LocalPacket {
-    hdr: LocalHeader,
-    payload: MASlab,
+impl LocalPacket {
+    pub fn from_parts_with_alloc<T: Serialize>(
+        msg: T,
+        src: AddrPort,
+        dst: AddrPort,
+        allo: &'static AllocSlab,
+    ) -> Option<Self> {
+        let mut buf = allo.alloc_box()?;
+        let len = to_slice(&msg, buf.deref_mut()).ok()?.len();
+        let arc = buf.into_arc();
+        let ssa = arc.sub_slice_arc(0, len).ok()?;
+
+        let lcp = LocalPacket {
+            hdr: LocalHeader {
+                src,
+                dst,
+
+                // TODO: record tick?
+                tick: 0,
+            },
+            payload: ManagedArcSlab::Owned(ssa),
+        };
+
+        Some(lcp)
+    }
 }
 
 struct PortQueue {
     port: AtomicU16,
-    to_task: MpMcQueue<TimeStampPacket, TASK_QUEUE_DEPTH>,
+    to_task: MpMcQueue<LocalPacket, TASK_QUEUE_DEPTH>,
     to_dispatch: MpMcQueue<LocalPacket, TASK_QUEUE_DEPTH>,
 }
 
@@ -214,16 +237,13 @@ impl<const PORTS: usize> Dispatch<PORTS> {
 
         // Ship it!
         pq.to_task
-            .enqueue(TimeStampPacket {
-                packet: LocalPacket {
-                    hdr: LocalHeader {
-                        src: lm.hdr.src,
-                        dst: lm.hdr.dst,
-                        tick: time,
-                    },
-                    payload: lm.msg.reroot(&arc).ok_or(ProcessMessageError::ReRoot)?,
+            .enqueue(LocalPacket {
+                hdr: LocalHeader {
+                    src: lm.hdr.src,
+                    dst: lm.hdr.dst,
+                    tick: time,
                 },
-                tick: time,
+                payload: lm.msg.reroot(&arc).ok_or(ProcessMessageError::ReRoot)?,
             })
             .map_err(|_| ProcessMessageError::TaskQueueFull)
     }
@@ -312,7 +332,7 @@ impl<const PORTS: usize> Dispatch<PORTS> {
 
 pub struct DispatchSocket<'a> {
     port: NonZeroU16,
-    to_task: &'a MpMcQueue<TimeStampPacket, TASK_QUEUE_DEPTH>,
+    to_task: &'a MpMcQueue<LocalPacket, TASK_QUEUE_DEPTH>,
     to_dispatch: &'a MpMcQueue<LocalPacket, TASK_QUEUE_DEPTH>,
 }
 
@@ -321,7 +341,7 @@ impl<'a> DispatchSocket<'a> {
         self.to_dispatch.enqueue(pkt)
     }
 
-    pub fn try_recv(&self) -> Option<TimeStampPacket> {
+    pub fn try_recv(&self) -> Option<LocalPacket> {
         self.to_task.dequeue()
     }
 

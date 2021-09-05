@@ -1,91 +1,51 @@
-use crate::{dispatch::{Dispatch, DispatchSocket}, icd::{BusDomMessage, BusSubMessage}};
+use crate::dispatch::{Dispatch, DispatchSocket, LocalHeader};
 
 // TODO: `no_std`
-use std::sync::Arc;
-
-use core::task::Poll;
+use core::{task::Poll, ops::Deref};
 
 use futures::future::poll_fn;
 use groundhog::RollingTimer;
 use heapless::Vec;
-use spin::{Mutex, MutexGuard};
+use postcard::from_bytes;
+use serde::de::DeserializeOwned;
 
 pub mod discover;
-pub mod ping;
 
-pub trait DomInterface {
-    fn send_blocking<'a>(&mut self, msg: BusDomMessage<'a>) -> Result<(), BusDomMessage<'a>>;
-    fn pop(&mut self) -> Option<BusSubMessage<'static>>;
-}
-
-// hmmm
-// This will need to look way different in no-std
-pub struct AsyncDomMutex<T>
-where
-    T: DomInterface,
+pub struct HeaderPacket<T>
 {
-    bus: Arc<Mutex<T>>,
-    table: Arc<Mutex<AddrTable32>>,
+    pub hdr: LocalHeader,
+    pub body: T,
 }
 
-impl<T> Clone for AsyncDomMutex<T>
-where
-    T: DomInterface,
-{
-    fn clone(&self) -> Self {
-        Self {
-            bus: self.bus.clone(),
-            table: self.table.clone(),
-        }
-    }
-}
-
-impl<T> AsyncDomMutex<T>
-where
-    T: DomInterface,
-{
-    pub fn new(intfc: T) -> Self {
-        Self {
-            bus: Arc::new(Mutex::new(intfc)),
-            table: Arc::new(Mutex::new(AddrTable32::new())),
-        }
-    }
-
-    // TODO: Custom type also with DerefMut
-    pub async fn lock_bus(&self) -> MutexGuard<'_, T> {
-        poll_fn(|_| match self.bus.try_lock() {
-            Some(mg) => Poll::Ready(mg),
-            None => Poll::Pending,
-        })
-        .await
-    }
-
-    // TODO: Custom type also with DerefMut
-    pub async fn lock_table(&self) -> MutexGuard<'_, AddrTable32> {
-        poll_fn(|_| match self.table.try_lock() {
-            Some(mg) => Poll::Ready(mg),
-            None => Poll::Pending,
-        })
-        .await
-    }
-}
-
-pub async fn receive_timeout_micros<T, R>(
-    interface: &mut T,
+pub async fn receive_timeout_micros<R, T>(
+    interface: &mut DispatchSocket<'static>,
     start: R::Tick,
     duration: R::Tick,
-) -> Option<BusSubMessage<'static>>
+) -> Option<HeaderPacket<T>>
 where
-    T: DomInterface,
     R: RollingTimer<Tick = u32> + Default,
+    T: DeserializeOwned,
 {
     poll_fn(move |_| {
         let timer = R::default();
         if timer.micros_since(start) >= duration {
             Poll::Ready(None)
         } else {
-            match interface.pop() {
-                m @ Some(_) => Poll::Ready(m),
+            match interface.try_recv() {
+                Some(msg) => {
+                    match from_bytes(msg.payload.deref()) {
+                        Ok(m) => {
+                            Poll::Ready(Some(HeaderPacket {
+                                hdr: msg.hdr,
+                                body: m,
+                            }))
+                        }
+                        Err(_) => {
+                            Poll::Pending
+                        }
+                    }
+
+                },
                 _ => Poll::Pending,
             }
         }

@@ -3,11 +3,7 @@ use core::{marker::PhantomData, ops::DerefMut};
 use groundhog::RollingTimer;
 use rand::Rng;
 
-use crate::{
-    async_sleep_micros,
-    icd::BusSubMessage,
-    sub::{AsyncSubMutex, SubInterface},
-};
+use crate::{async_sleep_micros, icd::BusSubPayload, sub::{AsyncSubMutex, SubInterface}};
 
 pub struct Discovery<R, T, A>
 where
@@ -61,7 +57,7 @@ where
         };
 
         let (addr, sub_random, delay, resp) = if let Some((addr, sub_random, delay, resp)) =
-            BusSubMessage::generate_discover_ack(&mut self.rand, msg)
+            BusSubPayload::generate_discover_ack(&mut self.rand, hdrpkt)
         {
             (addr, sub_random, delay, resp)
         } else {
