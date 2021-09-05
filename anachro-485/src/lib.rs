@@ -2,10 +2,13 @@
 
 pub mod dom;
 pub mod icd;
-// pub mod sub;
+pub mod sub;
 pub mod dispatch;
 
+use dispatch::{DispatchSocket, LocalHeader};
 use groundhog::{self, RollingTimer};
+use postcard::from_bytes;
+use serde::de::DeserializeOwned;
 
 /*
 
@@ -18,7 +21,7 @@ use groundhog::{self, RollingTimer};
 
 */
 
-use core::task::Poll;
+use core::{ops::Deref, task::Poll};
 use futures::future::poll_fn;
 
 // TODO: This should probably live in groundhog
@@ -55,3 +58,44 @@ where
     .await;
 }
 
+pub struct HeaderPacket<T>
+{
+    pub hdr: LocalHeader,
+    pub body: T,
+}
+
+pub async fn receive_timeout_micros<R, T>(
+    interface: &mut DispatchSocket<'static>,
+    start: R::Tick,
+    duration: R::Tick,
+) -> Option<HeaderPacket<T>>
+where
+    R: RollingTimer<Tick = u32> + Default,
+    T: DeserializeOwned,
+{
+    poll_fn(move |_| {
+        let timer = R::default();
+        if timer.micros_since(start) >= duration {
+            Poll::Ready(None)
+        } else {
+            match interface.try_recv() {
+                Some(msg) => {
+                    match from_bytes(msg.payload.deref()) {
+                        Ok(m) => {
+                            Poll::Ready(Some(HeaderPacket {
+                                hdr: msg.hdr,
+                                body: m,
+                            }))
+                        }
+                        Err(_) => {
+                            Poll::Pending
+                        }
+                    }
+
+                },
+                _ => Poll::Pending,
+            }
+        }
+    })
+    .await
+}

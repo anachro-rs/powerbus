@@ -1,57 +1,10 @@
-use crate::dispatch::{Dispatch, DispatchSocket, LocalHeader};
+use crate::dispatch::{Dispatch, DispatchSocket};
 
 // TODO: `no_std`
-use core::{task::Poll, ops::Deref};
 
-use futures::future::poll_fn;
-use groundhog::RollingTimer;
 use heapless::Vec;
-use postcard::from_bytes;
-use serde::de::DeserializeOwned;
 
 pub mod discover;
-
-pub struct HeaderPacket<T>
-{
-    pub hdr: LocalHeader,
-    pub body: T,
-}
-
-pub async fn receive_timeout_micros<R, T>(
-    interface: &mut DispatchSocket<'static>,
-    start: R::Tick,
-    duration: R::Tick,
-) -> Option<HeaderPacket<T>>
-where
-    R: RollingTimer<Tick = u32> + Default,
-    T: DeserializeOwned,
-{
-    poll_fn(move |_| {
-        let timer = R::default();
-        if timer.micros_since(start) >= duration {
-            Poll::Ready(None)
-        } else {
-            match interface.try_recv() {
-                Some(msg) => {
-                    match from_bytes(msg.payload.deref()) {
-                        Ok(m) => {
-                            Poll::Ready(Some(HeaderPacket {
-                                hdr: msg.hdr,
-                                body: m,
-                            }))
-                        }
-                        Err(_) => {
-                            Poll::Pending
-                        }
-                    }
-
-                },
-                _ => Poll::Pending,
-            }
-        }
-    })
-    .await
-}
 
 pub struct AddrTable32 {
     available: u32,

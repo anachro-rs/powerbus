@@ -1,32 +1,33 @@
-use core::{marker::PhantomData, ops::DerefMut};
+use core::marker::PhantomData;
 
+use byte_slab::BSlab;
 use groundhog::RollingTimer;
 use rand::Rng;
 
-use crate::{async_sleep_micros, icd::BusSubPayload, sub::{AsyncSubMutex, SubInterface}};
+use crate::{async_sleep_micros, dispatch::{DispatchSocket, LocalPacket}, icd::{BusDomPayload, BusSubPayload, SLAB_SIZE, TOTAL_SLABS}, receive_timeout_micros};
 
-pub struct Discovery<R, T, A>
+pub struct Discovery<R, A>
 where
     R: RollingTimer<Tick = u32> + Default,
-    T: SubInterface,
     A: Rng,
 {
     _timer: PhantomData<R>,
-    mutex: AsyncSubMutex<T>,
+    socket: DispatchSocket<'static>,
     rand: A,
+    alloc: &'static BSlab<TOTAL_SLABS, SLAB_SIZE>,
 }
 
-impl<R, T, A> Discovery<R, T, A>
+impl<R, A> Discovery<R, A>
 where
     R: RollingTimer<Tick = u32> + Default,
-    T: SubInterface,
     A: Rng,
 {
-    pub fn new(mutex: AsyncSubMutex<T>, rand: A) -> Self {
+    pub fn new(rand: A, socket: DispatchSocket<'static>, alloc: &'static BSlab<TOTAL_SLABS, SLAB_SIZE>) -> Self {
         Self {
             _timer: PhantomData,
-            mutex,
             rand,
+            socket,
+            alloc,
         }
     }
 
@@ -42,11 +43,10 @@ where
     }
 
     pub async fn obtain_addr_inner(&mut self) -> Result<Option<u8>, ()> {
-        let mut bus = self.mutex.lock_bus().await;
         let timer = R::default();
 
-        let msg = match super::receive_timeout_micros::<T, R>(
-            bus.deref_mut(),
+        let msg = match receive_timeout_micros::<R, BusDomPayload>(
+            &mut self.socket,
             timer.get_ticks(),
             1_000_000,
         )
@@ -57,7 +57,7 @@ where
         };
 
         let (addr, sub_random, delay, resp) = if let Some((addr, sub_random, delay, resp)) =
-            BusSubPayload::generate_discover_ack(&mut self.rand, hdrpkt)
+            BusSubPayload::generate_discover_ack(&mut self.rand, msg.body, &msg.hdr)
         {
             (addr, sub_random, delay, resp)
         } else {
@@ -71,18 +71,20 @@ where
         }
 
         async_sleep_micros::<R>(timer.get_ticks(), delay).await;
-        bus.send_blocking(resp).map_err(drop)?;
+
+        let msg = LocalPacket::from_parts_with_alloc(resp.body, resp.hdr.src, resp.hdr.dst, self.alloc).ok_or(())?;
+        self.socket.try_send(msg).map_err(drop)?;
 
         let start = timer.get_ticks();
         loop {
-            let msg = match super::receive_timeout_micros::<T, R>(bus.deref_mut(), start, 250_000)
+            let msg = match receive_timeout_micros::<R, BusDomPayload>(&mut self.socket, start, 250_000)
                 .await
             {
                 Some(msg) => msg,
                 None => return Ok(None),
             };
 
-            match msg.validate_discover_ack_ack(sub_random) {
+            match msg.body.validate_discover_ack_ack(&msg.hdr, sub_random) {
                 Ok(new_addr) if new_addr == addr => {
                     println!("yey");
                     break;
@@ -93,10 +95,10 @@ where
         }
 
         let start = timer.get_ticks();
-        let mut success_ct = 0;
+        let mut success_ct: u8 = 0;
 
         loop {
-            let msg = match super::receive_timeout_micros::<T, R>(bus.deref_mut(), start, 5_000_000)
+            let msg = match receive_timeout_micros::<R, BusDomPayload>(&mut self.socket, start, 5_000_000)
                 .await
             {
                 Some(msg) => msg,
@@ -104,11 +106,12 @@ where
             };
 
             let j_start = timer.get_ticks();
-            if let Some((jitter, msg)) = BusSubMessage::generate_ping_ack(&mut self.rand, addr, msg)
+            if let Some((jitter, resp)) = BusSubPayload::generate_ping_ack(&mut self.rand, addr, msg.body, &msg.hdr)
             {
                 async_sleep_micros::<R>(j_start, jitter).await;
 
-                bus.send_blocking(msg).map_err(drop)?;
+                let msg = LocalPacket::from_parts_with_alloc(resp.body, resp.hdr.src, resp.hdr.dst, self.alloc).ok_or(())?;
+                self.socket.try_send(msg).map_err(drop)?;
 
                 success_ct += 1;
                 if success_ct >= 2 {

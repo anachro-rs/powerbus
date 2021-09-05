@@ -1,4 +1,4 @@
-use crate::{async_sleep_millis, dispatch::{DispatchSocket, LocalPacket}, icd::{AddrPort, BusDomPayload, BusSubPayload, SLAB_SIZE, TOTAL_SLABS, VecAddr}};
+use crate::{async_sleep_millis, dispatch::{DispatchSocket, LocalPacket}, icd::{AddrPort, BusDomPayload, BusSubPayload, SLAB_SIZE, TOTAL_SLABS, VecAddr}, receive_timeout_micros};
 
 use core::{
     iter::FromIterator,
@@ -128,8 +128,7 @@ where
             let start = timer.get_ticks();
 
             'inner: loop {
-                let maybe_msg =
-                    super::receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, 20_000u32).await;
+                let maybe_msg = receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, 20_000u32).await;
 
                 let msg = match maybe_msg {
                     Some(msg) => msg,
@@ -181,8 +180,7 @@ where
 
         // Collect until timeout, or max messages received
         while !resps.is_full() {
-            let maybe_msg =
-                super::receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, 200_000u32).await;
+            let maybe_msg = receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, 200_000u32).await;
 
             if let Some(msg) = maybe_msg {
                 resps.push(msg).map_err(drop)?;
