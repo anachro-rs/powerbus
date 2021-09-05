@@ -1,22 +1,18 @@
-use std::num::NonZeroU8;
-use std::thread::{spawn, sleep};
-use std::time::{Duration, Instant};
+use anachro_485::dom::{discover::Discovery, AsyncDomMutex, DomInterface};
 use sim_485::groundhog_sim::GlobalRollingTimer;
-use anachro_485::dom::{
-    discover::Discovery,
-    DomInterface,
-    AsyncDomMutex,
-};
+use std::num::NonZeroU8;
+use std::thread::{sleep, spawn};
+use std::time::{Duration, Instant};
 
-use cassette::{Cassette, pin_mut};
+use cassette::{pin_mut, Cassette};
 use rand::thread_rng;
 
 fn main() {
     let x = DummyDom {};
     let mtx = AsyncDomMutex::new(x);
 
-
-    let mut disco: Discovery<GlobalRollingTimer, DummyDom, _> = Discovery::new(mtx.clone(), thread_rng());
+    let mut disco: Discovery<GlobalRollingTimer, DummyDom, _> =
+        Discovery::new(mtx.clone(), thread_rng());
     let disco_future = disco.poll();
     pin_mut!(disco_future);
 
@@ -48,12 +44,13 @@ fn main() {
 }
 
 #[derive(Debug, Clone)]
-struct DummyDom {
-
-}
+struct DummyDom {}
 
 impl DomInterface for DummyDom {
-    fn send_blocking(&mut self, msg: anachro_485::icd::BusDomMessage) -> Result<(), anachro_485::icd::BusDomMessage> {
+    fn send_blocking(
+        &mut self,
+        msg: anachro_485::icd::BusDomMessage,
+    ) -> Result<(), anachro_485::icd::BusDomMessage> {
         println!("Fake push!");
         Ok(())
     }

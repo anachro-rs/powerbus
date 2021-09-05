@@ -1,18 +1,17 @@
 #![cfg_attr(not(test), no_std)]
 
+use core::marker::PhantomData;
 /// # Byte Slab
 ///
 /// TODO: This probably does not handle unwind safety correctly!
 /// Please verify before using in non-abort-panic environments!
-
 use core::{
-    sync::atomic::{AtomicU8, AtomicUsize, Ordering},
     cell::UnsafeCell,
     mem::{forget, MaybeUninit},
-    slice::from_raw_parts,
     ops::{Deref, DerefMut},
+    slice::from_raw_parts,
+    sync::atomic::{AtomicU8, AtomicUsize, Ordering},
 };
-use core::marker::PhantomData;
 pub use heapless::mpmc::MpMcQueue;
 
 // TODO: This doesn't HAVE to be 'static, but it makes my life easier
@@ -41,7 +40,7 @@ pub struct SlabSliceArc<const N: usize, const SZ: usize> {
 #[derive(Clone)]
 pub enum ManagedArcSlab<'a, const N: usize, const SZ: usize> {
     Borrowed(&'a [u8]),
-    Owned(SlabSliceArc<N, SZ>)
+    Owned(SlabSliceArc<N, SZ>),
 }
 
 // ------ SLAB BOX
@@ -51,17 +50,12 @@ impl<const N: usize, const SZ: usize> Drop for SlabBox<N, SZ> {
         let arc = unsafe { self.slab.get_idx_unchecked(self.idx).arc };
 
         // drop refct
-        let zero = arc.compare_exchange(
-            1,
-            0,
-            Ordering::SeqCst,
-            Ordering::SeqCst
-        );
+        let zero = arc.compare_exchange(1, 0, Ordering::SeqCst, Ordering::SeqCst);
         // TODO: Make debug assert?
         assert!(zero.is_ok());
 
         // TODO: Why is this necessary?
-        while let Err(_) = self.slab.alloc_q.enqueue(self.idx) { }
+        while let Err(_) = self.slab.alloc_q.enqueue(self.idx) {}
 
         // TODO: Zero on drop? As option?
     }
@@ -73,9 +67,7 @@ impl<const N: usize, const SZ: usize> Deref for SlabBox<N, SZ> {
     fn deref(&self) -> &Self::Target {
         let buf = unsafe { self.slab.get_idx_unchecked(self.idx).buf };
 
-        unsafe {
-            &*buf.get()
-        }
+        unsafe { &*buf.get() }
     }
 }
 
@@ -83,9 +75,7 @@ impl<const N: usize, const SZ: usize> DerefMut for SlabBox<N, SZ> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         let buf = unsafe { self.slab.get_idx_unchecked(self.idx).buf };
 
-        unsafe {
-            &mut *buf.get()
-        }
+        unsafe { &mut *buf.get() }
     }
 }
 
@@ -155,7 +145,7 @@ impl<const N: usize, const SZ: usize> Drop for SlabArc<N, SZ> {
 
         // We just dropped the refct to zero. Release the structure
         if refct == 1 {
-            while let Err(_) = self.slab.alloc_q.enqueue(self.idx) { }
+            while let Err(_) = self.slab.alloc_q.enqueue(self.idx) {}
         }
     }
 }
@@ -166,9 +156,7 @@ impl<const N: usize, const SZ: usize> Deref for SlabArc<N, SZ> {
     fn deref(&self) -> &Self::Target {
         let buf = unsafe { self.slab.get_idx_unchecked(self.idx).buf };
 
-        unsafe {
-            &*buf.get()
-        }
+        unsafe { &*buf.get() }
     }
 }
 
@@ -227,8 +215,8 @@ impl<const N: usize, const SZ: usize> SlabSliceArc<N, SZ> {
 }
 
 use core::fmt::Debug;
-use serde::ser::Serialize;
 use serde::de::Deserialize;
+use serde::ser::Serialize;
 
 impl<'a, const N: usize, const SZ: usize> Debug for ManagedArcSlab<'a, N, SZ> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -243,24 +231,25 @@ impl<'a, const N: usize, const SZ: usize> Debug for ManagedArcSlab<'a, N, SZ> {
 impl<'a, const N: usize, const SZ: usize> Serialize for ManagedArcSlab<'a, N, SZ> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer
+        S: serde::Serializer,
     {
         let data: &[u8] = self.deref();
         data.serialize(serializer)
     }
 }
 
-
 impl<'de: 'a, 'a, const N: usize, const SZ: usize> Deserialize<'de> for ManagedArcSlab<'a, N, SZ> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de>
+        D: serde::Deserializer<'de>,
     {
         struct ByteVisitor<'a, const N: usize, const SZ: usize> {
             pd: PhantomData<&'a ()>,
         }
 
-        impl<'d: 'ai, 'ai, const NI: usize, const SZI: usize> serde::de::Visitor<'d> for ByteVisitor<'ai, NI, SZI> {
+        impl<'d: 'ai, 'ai, const NI: usize, const SZI: usize> serde::de::Visitor<'d>
+            for ByteVisitor<'ai, NI, SZI>
+        {
             type Value = ManagedArcSlab<'ai, NI, SZI>;
 
             fn expecting(&self, _formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -284,7 +273,7 @@ impl<'a, const N: usize, const SZ: usize> Deref for ManagedArcSlab<'a, N, SZ> {
     fn deref(&self) -> &Self::Target {
         match self {
             ManagedArcSlab::Borrowed(data) => data,
-            ManagedArcSlab::Owned(ssa) => ssa.deref()
+            ManagedArcSlab::Owned(ssa) => ssa.deref(),
         }
     }
 }
@@ -327,12 +316,10 @@ impl<'a, const N: usize, const SZ: usize> ManagedArcSlab<'a, N, SZ> {
     }
 }
 
-
 // -----------
 
-
 // SAFETY: YOLO
-unsafe impl<const N: usize, const SZ: usize> Send for SlabBox<N, SZ> { }
+unsafe impl<const N: usize, const SZ: usize> Send for SlabBox<N, SZ> {}
 
 pub struct BSlab<const N: usize, const SZ: usize> {
     bufs: MaybeUninit<[UnsafeCell<[u8; SZ]>; N]>,
@@ -342,7 +329,7 @@ pub struct BSlab<const N: usize, const SZ: usize> {
 }
 
 // SAFETY: YOLO
-unsafe impl<const N: usize, const SZ: usize> Sync for BSlab<N, SZ> { }
+unsafe impl<const N: usize, const SZ: usize> Sync for BSlab<N, SZ> {}
 
 struct SlabIdxData<const SZ: usize> {
     buf: &'static UnsafeCell<[u8; SZ]>,
@@ -383,7 +370,7 @@ impl<const N: usize, const SZ: usize> BSlab<N, SZ> {
         }
     }
 
-    pub fn alloc_box(&'static self) -> Option<SlabBox<N,SZ>> {
+    pub fn alloc_box(&'static self) -> Option<SlabBox<N, SZ>> {
         self.is_init().ok()?;
         let idx = self.alloc_q.dequeue()?;
         let arc = unsafe { self.get_idx_unchecked(idx).arc };
@@ -392,10 +379,7 @@ impl<const N: usize, const SZ: usize> BSlab<N, SZ> {
         // so we can disregard the previous value
         arc.store(1, Ordering::SeqCst);
 
-        Some(SlabBox {
-            slab: self,
-            idx,
-        })
+        Some(SlabBox { slab: self, idx })
     }
 
     unsafe fn get_idx_unchecked(&'static self, idx: usize) -> SlabIdxData<SZ> {
@@ -408,12 +392,14 @@ impl<const N: usize, const SZ: usize> BSlab<N, SZ> {
     pub fn init(&self) -> Result<(), ()> {
         // Begin initialization. Returns an error if the slab was not previously
         // uninitialized
-        self.state.compare_exchange(
-            Self::UNINIT,
-            Self::INITIALIZING,
-            Ordering::SeqCst,
-            Ordering::SeqCst
-        ).map_err(drop)?;
+        self.state
+            .compare_exchange(
+                Self::UNINIT,
+                Self::INITIALIZING,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .map_err(drop)?;
 
         // Initialize each slab to zero to prevent UB
         unsafe {
@@ -432,12 +418,14 @@ impl<const N: usize, const SZ: usize> BSlab<N, SZ> {
 
         // Complete initialization. Returns an error if the slab was not previously
         // uninitialized
-        self.state.compare_exchange(
-            Self::INITIALIZING,
-            Self::INITIALIZED,
-            Ordering::SeqCst,
-            Ordering::SeqCst
-        ).map_err(drop)?;
+        self.state
+            .compare_exchange(
+                Self::INITIALIZING,
+                Self::INITIALIZED,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .map_err(drop)?;
 
         Ok(())
     }

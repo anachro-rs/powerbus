@@ -1,11 +1,23 @@
-use std::{iter::FromIterator, ops::Deref, sync::{Arc, Mutex, RwLock}, thread::{JoinHandle, sleep, spawn}, time::Duration};
+use std::{
+    iter::FromIterator,
+    ops::Deref,
+    sync::{Arc, Mutex, RwLock},
+    thread::{sleep, spawn, JoinHandle},
+    time::Duration,
+};
 
+use anachro_485::{
+    declare_dom,
+    dispatch::{Dispatch, IoQueue, TimeStampBox},
+    dom::{discover::Discovery as DomDiscovery, DomHandle, MANAGEMENT_PORT},
+    icd::{SLAB_SIZE, TOTAL_SLABS},
+    sub::discover::Discovery as SubDiscovery,
+};
 use groundhog::RollingTimer;
-use sim_485::{Rs485Bus, Rs485Device, groundhog_sim::GlobalRollingTimer};
-use anachro_485::{declare_dom, dispatch::{Dispatch, IoQueue, TimeStampBox}, dom::{DomHandle, MANAGEMENT_PORT, discover::Discovery as DomDiscovery}, icd::{TOTAL_SLABS, SLAB_SIZE}, sub::discover::Discovery as SubDiscovery};
+use sim_485::{groundhog_sim::GlobalRollingTimer, Rs485Bus, Rs485Device};
 
 use byte_slab::BSlab;
-use cassette::{Cassette, pin_mut};
+use cassette::{pin_mut, Cassette};
 use rand::thread_rng;
 
 fn main() {
@@ -13,42 +25,34 @@ fn main() {
 
     let mut network = Vec::from_iter([
         make_me_a_dom(&arc_bus),
-
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
-
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
-
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
-
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
-
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
-
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
-
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
-
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
         make_me_a_sub(&arc_bus),
@@ -73,7 +77,6 @@ fn make_me_a_dom(arc_bus: &Arc<Rs485Bus>) -> DevHdl {
     let care_lock_2 = care_lock_1.clone();
 
     let logic = spawn(move || {
-
         let slab: &'static BSlab<TOTAL_SLABS, SLAB_SIZE> = Box::leak(Box::new(BSlab::new()));
         let ioq: &'static IoQueue = Box::leak(Box::new(IoQueue::new()));
         let dispatch: &'static Dispatch<8> = Box::leak(Box::new(Dispatch::new(ioq, slab)));
@@ -90,7 +93,8 @@ fn make_me_a_dom(arc_bus: &Arc<Rs485Bus>) -> DevHdl {
 
         let socket = dispatch.register_port(MANAGEMENT_PORT).unwrap();
 
-        let mut dom_disco: DomDiscovery<GlobalRollingTimer, _> = DomDiscovery::new(socket, thread_rng(), slab);
+        let mut dom_disco: DomDiscovery<GlobalRollingTimer, _> =
+            DomDiscovery::new(socket, thread_rng(), slab);
         let dom_disco_future = dom_disco.poll();
         pin_mut!(dom_disco_future);
 
@@ -108,8 +112,12 @@ fn make_me_a_dom(arc_bus: &Arc<Rs485Bus>) -> DevHdl {
         }
     });
 
-        let io = spawn(move || {
-        let CarePackage { slab, ioq, dispatch } = loop {
+    let io = spawn(move || {
+        let CarePackage {
+            slab,
+            ioq,
+            dispatch,
+        } = loop {
             if let Ok(mut care_g) = care_lock_1.lock() {
                 if let Some(care) = care_g.take() {
                     break care;
@@ -143,7 +151,6 @@ fn make_me_a_dom(arc_bus: &Arc<Rs485Bus>) -> DevHdl {
             };
             let mut remain = carry.split_off(pos);
 
-
             core::mem::swap(&mut carry, &mut remain);
             let current = remain;
 
@@ -156,11 +163,13 @@ fn make_me_a_dom(arc_bus: &Arc<Rs485Bus>) -> DevHdl {
                     // TODO: This is a hack!
                     sbox[pos..].fill(0);
 
-                    io_hdl.push_incoming(TimeStampBox {
-                        packet: sbox,
-                        tick: timer.get_ticks(),
-                    }).map_err(drop).unwrap();
-
+                    io_hdl
+                        .push_incoming(TimeStampBox {
+                            packet: sbox,
+                            tick: timer.get_ticks(),
+                        })
+                        .map_err(drop)
+                        .unwrap();
                 } else {
                     println!("No alloc for io!");
                 }
@@ -168,10 +177,7 @@ fn make_me_a_dom(arc_bus: &Arc<Rs485Bus>) -> DevHdl {
         }
     });
 
-    DevHdl {
-        logic,
-        io,
-    }
+    DevHdl { logic, io }
 }
 
 struct CarePackage {
@@ -203,7 +209,8 @@ fn make_me_a_sub(arc_bus: &Arc<Rs485Bus>) -> DevHdl {
 
         let socket = dispatch.register_port(MANAGEMENT_PORT).unwrap();
 
-        let mut sub_disco_1: SubDiscovery<GlobalRollingTimer, _> = SubDiscovery::new(thread_rng(), dispatch, socket, slab);
+        let mut sub_disco_1: SubDiscovery<GlobalRollingTimer, _> =
+            SubDiscovery::new(thread_rng(), dispatch, socket, slab);
         let sub_disco_future_1 = sub_disco_1.obtain_addr();
         pin_mut!(sub_disco_future_1);
         let mut cas_sub_1 = Cassette::new(sub_disco_future_1);
@@ -229,7 +236,11 @@ fn make_me_a_sub(arc_bus: &Arc<Rs485Bus>) -> DevHdl {
     });
 
     let io = spawn(move || {
-        let CarePackage { slab, ioq, dispatch } = loop {
+        let CarePackage {
+            slab,
+            ioq,
+            dispatch,
+        } = loop {
             if let Ok(mut care_g) = care_lock_1.lock() {
                 if let Some(care) = care_g.take() {
                     break care;
@@ -263,7 +274,6 @@ fn make_me_a_sub(arc_bus: &Arc<Rs485Bus>) -> DevHdl {
             };
             let mut remain = carry.split_off(pos);
 
-
             core::mem::swap(&mut carry, &mut remain);
             let current = remain;
 
@@ -276,11 +286,13 @@ fn make_me_a_sub(arc_bus: &Arc<Rs485Bus>) -> DevHdl {
                     // TODO: This is a hack!
                     sbox[pos..].fill(0);
 
-                    io_hdl.push_incoming(TimeStampBox {
-                        packet: sbox,
-                        tick: timer.get_ticks(),
-                    }).map_err(drop).unwrap();
-
+                    io_hdl
+                        .push_incoming(TimeStampBox {
+                            packet: sbox,
+                            tick: timer.get_ticks(),
+                        })
+                        .map_err(drop)
+                        .unwrap();
                 } else {
                     println!("No alloc for io!");
                 }
@@ -288,8 +300,5 @@ fn make_me_a_sub(arc_bus: &Arc<Rs485Bus>) -> DevHdl {
         }
     });
 
-    DevHdl {
-        logic,
-        io,
-    }
+    DevHdl { logic, io }
 }

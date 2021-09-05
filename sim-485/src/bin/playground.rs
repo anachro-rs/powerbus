@@ -1,7 +1,7 @@
-use std::num::NonZeroU8;
-use std::thread::{spawn, sleep};
-use std::time::{Duration, Instant};
 use sim_485::*;
+use std::num::NonZeroU8;
+use std::thread::{sleep, spawn};
+use std::time::{Duration, Instant};
 
 fn main() {
     let mut arc_bus = Rs485Bus::new_arc(10);
@@ -104,5 +104,4 @@ fn main() {
     d1t.join().unwrap();
     d2t.join().unwrap();
     d3t.join().unwrap();
-
 }

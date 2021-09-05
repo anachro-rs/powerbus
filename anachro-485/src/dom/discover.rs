@@ -1,9 +1,11 @@
-use crate::{async_sleep_millis, dispatch::{DispatchSocket, LocalPacket}, icd::{AddrPort, BusDomPayload, BusSubPayload, SLAB_SIZE, TOTAL_SLABS, VecAddr}, receive_timeout_micros};
-
-use core::{
-    iter::FromIterator,
-    marker::PhantomData,
+use crate::{
+    async_sleep_millis,
+    dispatch::{DispatchSocket, LocalPacket},
+    icd::{AddrPort, BusDomPayload, BusSubPayload, VecAddr, SLAB_SIZE, TOTAL_SLABS},
+    receive_timeout_micros,
 };
+
+use core::{iter::FromIterator, marker::PhantomData};
 
 use byte_slab::BSlab;
 use groundhog::RollingTimer;
@@ -32,14 +34,18 @@ where
     R: RollingTimer<Tick = u32> + Default,
     A: Rng,
 {
-    pub fn new(socket: DispatchSocket<'static>, rand: A, alloc: &'static BSlab<TOTAL_SLABS, SLAB_SIZE>) -> Self {
+    pub fn new(
+        socket: DispatchSocket<'static>,
+        rand: A,
+        alloc: &'static BSlab<TOTAL_SLABS, SLAB_SIZE>,
+    ) -> Self {
         Self {
             _timer: PhantomData,
             socket,
             rand,
             table: AddrTable32::new(),
             boost_mode: true,
-            alloc
+            alloc,
         }
     }
 
@@ -118,20 +124,27 @@ where
 
         'outer: for ready in readies {
             let mut got = false;
-            let payload = BusDomPayload::PingReq { random: dom_random, min_wait_us: 2_000, max_wait_us: 20_000 };
+            let payload = BusDomPayload::PingReq {
+                random: dom_random,
+                min_wait_us: 2_000,
+                max_wait_us: 20_000,
+            };
 
             let msg = LocalPacket::from_parts_with_alloc(
                 payload,
                 AddrPort::from_parts(VecAddr::local_dom_addr(), MANAGEMENT_PORT),
                 AddrPort::from_parts(VecAddr::from_local_addr(*ready), MANAGEMENT_PORT),
                 self.alloc,
-            ).ok_or(())?;
+            )
+            .ok_or(())?;
 
             self.socket.try_send(msg).map_err(drop)?;
             let start = timer.get_ticks();
 
             'inner: loop {
-                let maybe_msg = receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, 40_000u32).await;
+                let maybe_msg =
+                    receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, 40_000u32)
+                        .await;
 
                 let msg = match maybe_msg {
                     Some(msg) => msg,
@@ -173,7 +186,8 @@ where
             AddrPort::from_parts(VecAddr::local_dom_addr(), MANAGEMENT_PORT),
             AddrPort::from_parts(VecAddr::local_broadcast_addr(), MANAGEMENT_PORT),
             self.alloc,
-        ).ok_or(())?;
+        )
+        .ok_or(())?;
         println!("BROADCAST!");
         self.socket.try_send(msg).map_err(drop)?;
 
@@ -183,7 +197,9 @@ where
 
         // Collect until timeout, or max messages received
         while !resps.is_full() {
-            let maybe_msg = receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, 200_000u32).await;
+            let maybe_msg =
+                receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, 200_000u32)
+                    .await;
 
             if let Some(msg) = maybe_msg {
                 resps.push(msg).map_err(drop)?;
@@ -211,7 +227,11 @@ where
                 .iter()
                 // Remove any items that don't check out
                 // .inspect(|r| println!("START: {:?}", r))
-                .filter_map(|resp| resp.body.validate_discover_ack_addr(&resp.hdr, dom_random).ok())
+                .filter_map(|resp| {
+                    resp.body
+                        .validate_discover_ack_addr(&resp.hdr, dom_random)
+                        .ok()
+                })
                 .inspect(|r| println!("FM1: {:?}", r))
                 // Remove any items that weren't offered
                 .filter(|(resp_addr, _)| offered.contains(resp_addr))
@@ -242,19 +262,16 @@ where
         for (addr, sub_random) in response_pairs.iter() {
             println!("ACCEPTING: {:?}", addr);
             if let Ok(_) = accepted.push(*addr) {
-
-                let msg = BusDomPayload::generate_discover_ack_ack(
-                    *addr,
-                    self.rand.gen(),
-                    *sub_random,
-                );
+                let msg =
+                    BusDomPayload::generate_discover_ack_ack(*addr, self.rand.gen(), *sub_random);
 
                 let msg = LocalPacket::from_parts_with_alloc(
                     msg.body,
                     msg.hdr.src,
                     msg.hdr.dst,
                     self.alloc,
-                ).ok_or(())?;
+                )
+                .ok_or(())?;
 
                 self.socket.try_send(msg).map_err(drop)?;
             }

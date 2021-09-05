@@ -1,9 +1,9 @@
 // Okay, what do we have here. Let's get back to layers:
 
+pub mod dispatch;
 pub mod dom;
 pub mod icd;
 pub mod sub;
-pub mod dispatch;
 
 use dispatch::{DispatchSocket, LocalHeader};
 use groundhog::{self, RollingTimer};
@@ -58,8 +58,7 @@ where
     .await;
 }
 
-pub struct HeaderPacket<T>
-{
+pub struct HeaderPacket<T> {
     pub hdr: LocalHeader,
     pub body: T,
 }
@@ -79,19 +78,12 @@ where
             Poll::Ready(None)
         } else {
             match interface.try_recv() {
-                Some(msg) => {
-                    match from_bytes(msg.payload.deref()) {
-                        Ok(m) => {
-                            Poll::Ready(Some(HeaderPacket {
-                                hdr: msg.hdr,
-                                body: m,
-                            }))
-                        }
-                        Err(_) => {
-                            Poll::Pending
-                        }
-                    }
-
+                Some(msg) => match from_bytes(msg.payload.deref()) {
+                    Ok(m) => Poll::Ready(Some(HeaderPacket {
+                        hdr: msg.hdr,
+                        body: m,
+                    })),
+                    Err(_) => Poll::Pending,
                 },
                 _ => Poll::Pending,
             }

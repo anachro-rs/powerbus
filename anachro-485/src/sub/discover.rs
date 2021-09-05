@@ -4,7 +4,12 @@ use byte_slab::BSlab;
 use groundhog::RollingTimer;
 use rand::Rng;
 
-use crate::{async_sleep_micros, dispatch::{Dispatch, DispatchSocket, INVALID_OWN_ADDR, LocalPacket}, icd::{BusDomPayload, BusSubPayload, SLAB_SIZE, TOTAL_SLABS}, receive_timeout_micros};
+use crate::{
+    async_sleep_micros,
+    dispatch::{Dispatch, DispatchSocket, LocalPacket, INVALID_OWN_ADDR},
+    icd::{BusDomPayload, BusSubPayload, SLAB_SIZE, TOTAL_SLABS},
+    receive_timeout_micros,
+};
 
 pub struct Discovery<R, A>
 where
@@ -23,7 +28,12 @@ where
     R: RollingTimer<Tick = u32> + Default,
     A: Rng,
 {
-    pub fn new(rand: A, dispatch: &'static Dispatch<8>, socket: DispatchSocket<'static>, alloc: &'static BSlab<TOTAL_SLABS, SLAB_SIZE>) -> Self {
+    pub fn new(
+        rand: A,
+        dispatch: &'static Dispatch<8>,
+        socket: DispatchSocket<'static>,
+        alloc: &'static BSlab<TOTAL_SLABS, SLAB_SIZE>,
+    ) -> Self {
         Self {
             _timer: PhantomData,
             rand,
@@ -78,17 +88,20 @@ where
 
         async_sleep_micros::<R>(timer.get_ticks(), delay).await;
 
-        let msg = LocalPacket::from_parts_with_alloc(resp.body, resp.hdr.src, resp.hdr.dst, self.alloc).ok_or(())?;
+        let msg =
+            LocalPacket::from_parts_with_alloc(resp.body, resp.hdr.src, resp.hdr.dst, self.alloc)
+                .ok_or(())?;
         self.socket.try_send(msg).map_err(drop)?;
 
         let start = timer.get_ticks();
         loop {
-            let msg = match receive_timeout_micros::<R, BusDomPayload>(&mut self.socket, start, 250_000)
-                .await
-            {
-                Some(msg) => msg,
-                None => return Ok(None),
-            };
+            let msg =
+                match receive_timeout_micros::<R, BusDomPayload>(&mut self.socket, start, 250_000)
+                    .await
+                {
+                    Some(msg) => msg,
+                    None => return Ok(None),
+                };
 
             match msg.body.validate_discover_ack_ack(&msg.hdr, sub_random) {
                 Ok(new_addr) if new_addr == addr => {
@@ -104,19 +117,30 @@ where
         let mut success_ct: u8 = 0;
 
         loop {
-            let msg = match receive_timeout_micros::<R, BusDomPayload>(&mut self.socket, start, 5_000_000)
-                .await
+            let msg = match receive_timeout_micros::<R, BusDomPayload>(
+                &mut self.socket,
+                start,
+                5_000_000,
+            )
+            .await
             {
                 Some(msg) => msg,
                 None => return Ok(None),
             };
 
             let j_start = timer.get_ticks();
-            if let Some((jitter, resp)) = BusSubPayload::generate_ping_ack(&mut self.rand, addr, msg.body, &msg.hdr)
+            if let Some((jitter, resp)) =
+                BusSubPayload::generate_ping_ack(&mut self.rand, addr, msg.body, &msg.hdr)
             {
                 async_sleep_micros::<R>(j_start, jitter).await;
 
-                let msg = LocalPacket::from_parts_with_alloc(resp.body, resp.hdr.src, resp.hdr.dst, self.alloc).ok_or(())?;
+                let msg = LocalPacket::from_parts_with_alloc(
+                    resp.body,
+                    resp.hdr.src,
+                    resp.hdr.dst,
+                    self.alloc,
+                )
+                .ok_or(())?;
                 self.socket.try_send(msg).map_err(drop)?;
 
                 success_ct += 1;

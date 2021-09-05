@@ -3,7 +3,7 @@ pub use heapless::Vec;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use crate::{HeaderPacket, dispatch::LocalHeader, dom::MANAGEMENT_PORT};
+use crate::{dispatch::LocalHeader, dom::MANAGEMENT_PORT, HeaderPacket};
 
 pub const MAX_ADDR_SEGMENTS: usize = 8;
 
@@ -25,10 +25,7 @@ pub struct AddrPort {
 
 impl AddrPort {
     pub fn from_parts(addr: VecAddr, port: u16) -> Self {
-        Self {
-            addr,
-            port,
-        }
+        Self { addr, port }
     }
 }
 
@@ -202,7 +199,11 @@ impl BusSubPayload {
         }
     }
 
-    pub fn validate_discover_ack_addr(&self, hdr: &LocalHeader, dom_random: u32) -> Result<(u8, u32), ()> {
+    pub fn validate_discover_ack_addr(
+        &self,
+        hdr: &LocalHeader,
+        dom_random: u32,
+    ) -> Result<(u8, u32), ()> {
         // Messages must come from the local bus
         let addr = hdr.src.addr.get_exact_local_addr().ok_or(())?;
 
@@ -236,7 +237,7 @@ impl BusSubPayload {
     pub fn generate_discover_ack<R: Rng>(
         rng: &mut R,
         dom: BusDomPayload,
-        hdr: &LocalHeader
+        hdr: &LocalHeader,
     ) -> Option<(u8, u32, u32, HeaderPacket<BusSubPayload>)> {
         let src = hdr.src.addr.get_exact_local_addr()?;
         let dst = hdr.dst.addr.get_exact_local_addr()?;
@@ -271,8 +272,8 @@ impl BusSubPayload {
                         own_id: addr,
                         own_random: sub_random,
                         own_id_rand_checksum: checksum_addr_random(addr, random, sub_random),
-                    }
-                }
+                    },
+                },
             ))
         } else {
             None
@@ -313,10 +314,7 @@ impl BusSubPayload {
                 },
             };
 
-            Some((
-                jitter,
-                resp,
-            ))
+            Some((jitter, resp))
         } else {
             None
         }

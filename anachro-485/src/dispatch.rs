@@ -3,13 +3,17 @@ use crate::icd::{
     TOTAL_SLABS,
 };
 
-use core::{num::NonZeroU16, ops::{Deref, DerefMut}, sync::atomic::{AtomicBool, AtomicU16, AtomicU8, Ordering::SeqCst}};
+use core::{
+    num::NonZeroU16,
+    ops::{Deref, DerefMut},
+    sync::atomic::{AtomicBool, AtomicU16, AtomicU8, Ordering::SeqCst},
+};
 
 use byte_slab::{BSlab, ManagedArcSlab, SlabBox};
 use cobs::decode_in_place;
-use serde::Serialize;
 use heapless::mpmc::MpMcQueue;
 use postcard::{from_bytes, to_slice, to_slice_cobs};
+use serde::Serialize;
 
 const TASK_QUEUE_DEPTH: usize = 4;
 const IO_QUEUE_DEPTH: usize = 32;
@@ -98,11 +102,11 @@ impl IoQueue {
     }
 
     pub fn take_io_handle(&'static self) -> Option<IoHandle> {
-        self.io_given.compare_exchange(false, true, SeqCst, SeqCst).ok()?;
+        self.io_given
+            .compare_exchange(false, true, SeqCst, SeqCst)
+            .ok()?;
 
-        Some(IoHandle {
-            ioq: &self,
-        })
+        Some(IoHandle { ioq: &self })
     }
 }
 
@@ -189,7 +193,9 @@ impl<const PORTS: usize> Dispatch<PORTS> {
             .iter()
             .find(|p| {
                 // Find/Allocate the slot
-                p.port.compare_exchange(INVALID_PORT, port, SeqCst, SeqCst).is_ok()
+                p.port
+                    .compare_exchange(INVALID_PORT, port, SeqCst, SeqCst)
+                    .is_ok()
             })
             .map(|slot| {
                 // Return an allocated slot

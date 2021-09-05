@@ -10,9 +10,7 @@ impl GlobalRollingTimer {
     pub fn new() -> Self {
         static START: OnceCell<Instant> = OnceCell::new();
         Self {
-            start: *START.get_or_init(|| {
-                Instant::now()
-            }),
+            start: *START.get_or_init(|| Instant::now()),
         }
     }
 }
