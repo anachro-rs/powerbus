@@ -2,17 +2,14 @@ use crate::icd::{
     AddrPort, LineHeader, LineMessage, VecAddr, LOCAL_BROADCAST_ADDR, LOCAL_DOM_ADDR, SLAB_SIZE,
     TOTAL_SLABS,
 };
+
+use core::{num::NonZeroU16, ops::{Deref, DerefMut}, sync::atomic::{AtomicBool, AtomicU16, AtomicU8, Ordering::SeqCst}};
+
 use byte_slab::{BSlab, ManagedArcSlab, SlabBox};
 use cobs::decode_in_place;
 use serde::Serialize;
-use core::{
-    num::NonZeroU16,
-    ops::DerefMut,
-    sync::atomic::{AtomicU16, Ordering::SeqCst},
-};
 use heapless::mpmc::MpMcQueue;
 use postcard::{from_bytes, to_slice, to_slice_cobs};
-use std::{ops::Deref, sync::atomic::AtomicU8};
 
 const TASK_QUEUE_DEPTH: usize = 4;
 const IO_QUEUE_DEPTH: usize = 32;
@@ -22,8 +19,8 @@ type AllocSlab = BSlab<TOTAL_SLABS, SLAB_SIZE>;
 type MASlab = ManagedArcSlab<'static, TOTAL_SLABS, SLAB_SIZE>;
 
 pub struct TimeStampBox {
-    packet: BBox,
-    tick: u32,
+    pub packet: BBox,
+    pub tick: u32,
 }
 
 #[derive(Debug)]
@@ -74,6 +71,21 @@ struct PortQueue {
 pub struct IoQueue {
     to_io: MpMcQueue<MASlab, IO_QUEUE_DEPTH>,
     to_dispatch: MpMcQueue<TimeStampBox, IO_QUEUE_DEPTH>,
+    io_given: AtomicBool,
+}
+
+pub struct IoHandle {
+    ioq: &'static IoQueue,
+}
+
+impl IoHandle {
+    pub fn push_incoming(&mut self, tsb: TimeStampBox) -> Result<(), TimeStampBox> {
+        self.ioq.to_dispatch.enqueue(tsb)
+    }
+
+    pub fn pop_outgoing(&mut self) -> Option<MASlab> {
+        self.ioq.to_io.dequeue()
+    }
 }
 
 impl IoQueue {
@@ -81,7 +93,16 @@ impl IoQueue {
         Self {
             to_io: MpMcQueue::new(),
             to_dispatch: MpMcQueue::new(),
+            io_given: AtomicBool::new(false),
         }
+    }
+
+    pub fn take_io_handle(&'static self) -> Option<IoHandle> {
+        self.io_given.compare_exchange(false, true, SeqCst, SeqCst).ok()?;
+
+        Some(IoHandle {
+            ioq: &self,
+        })
     }
 }
 
@@ -133,6 +154,10 @@ impl<const PORTS: usize> Dispatch<PORTS> {
             shame: MpMcQueue::new(),
             alloc,
         }
+    }
+
+    pub fn set_addr(&self, addr: u8) {
+        self.own_addr.store(addr, SeqCst);
     }
 
     /// Register a port, and receive a socket for the corresponding port.

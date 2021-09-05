@@ -47,14 +47,17 @@ where
         let timer = R::default();
         let start = timer.get_ticks();
         self.boost_mode = true;
+        // self.boost_mode = false;
 
         loop {
-            if self.boost_mode && timer.millis_since(start) >= 5000 {
+            if self.boost_mode && timer.millis_since(start) >= 10_000 {
                 self.boost_mode = false;
             }
 
             if !self.boost_mode {
                 async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
+            } else {
+                async_sleep_millis::<R>(timer.get_ticks(), 10u32).await;
             }
 
             match self.poll_inner().await {
@@ -115,7 +118,7 @@ where
 
         'outer: for ready in readies {
             let mut got = false;
-            let payload = BusDomPayload::PingReq { random: dom_random, min_wait_us: 1_000, max_wait_us: 10_000 };
+            let payload = BusDomPayload::PingReq { random: dom_random, min_wait_us: 2_000, max_wait_us: 20_000 };
 
             let msg = LocalPacket::from_parts_with_alloc(
                 payload,
@@ -128,7 +131,7 @@ where
             let start = timer.get_ticks();
 
             'inner: loop {
-                let maybe_msg = receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, 20_000u32).await;
+                let maybe_msg = receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, 40_000u32).await;
 
                 let msg = match maybe_msg {
                     Some(msg) => msg,
@@ -171,7 +174,7 @@ where
             AddrPort::from_parts(VecAddr::local_broadcast_addr(), MANAGEMENT_PORT),
             self.alloc,
         ).ok_or(())?;
-
+        println!("BROADCAST!");
         self.socket.try_send(msg).map_err(drop)?;
 
         // Start the receive

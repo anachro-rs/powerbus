@@ -4,7 +4,7 @@ use byte_slab::BSlab;
 use groundhog::RollingTimer;
 use rand::Rng;
 
-use crate::{async_sleep_micros, dispatch::{DispatchSocket, LocalPacket}, icd::{BusDomPayload, BusSubPayload, SLAB_SIZE, TOTAL_SLABS}, receive_timeout_micros};
+use crate::{async_sleep_micros, dispatch::{Dispatch, DispatchSocket, INVALID_OWN_ADDR, LocalPacket}, icd::{BusDomPayload, BusSubPayload, SLAB_SIZE, TOTAL_SLABS}, receive_timeout_micros};
 
 pub struct Discovery<R, A>
 where
@@ -12,6 +12,7 @@ where
     A: Rng,
 {
     _timer: PhantomData<R>,
+    dispatch: &'static Dispatch<8>,
     socket: DispatchSocket<'static>,
     rand: A,
     alloc: &'static BSlab<TOTAL_SLABS, SLAB_SIZE>,
@@ -22,12 +23,13 @@ where
     R: RollingTimer<Tick = u32> + Default,
     A: Rng,
 {
-    pub fn new(rand: A, socket: DispatchSocket<'static>, alloc: &'static BSlab<TOTAL_SLABS, SLAB_SIZE>) -> Self {
+    pub fn new(rand: A, dispatch: &'static Dispatch<8>, socket: DispatchSocket<'static>, alloc: &'static BSlab<TOTAL_SLABS, SLAB_SIZE>) -> Self {
         Self {
             _timer: PhantomData,
             rand,
             socket,
             alloc,
+            dispatch,
         }
     }
 
@@ -44,6 +46,7 @@ where
 
     pub async fn obtain_addr_inner(&mut self) -> Result<Option<u8>, ()> {
         let timer = R::default();
+        self.dispatch.set_addr(INVALID_OWN_ADDR);
 
         let msg = match receive_timeout_micros::<R, BusDomPayload>(
             &mut self.socket,
@@ -69,6 +72,9 @@ where
         if self.rand.gen_range(0..4) != 0 {
             return Ok(None);
         }
+
+        // Set our own addr to the provisionally chosen one
+        self.dispatch.set_addr(addr);
 
         async_sleep_micros::<R>(timer.get_ticks(), delay).await;
 
