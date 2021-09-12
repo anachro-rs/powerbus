@@ -8,13 +8,11 @@ use {
         gpio::{p0::Parts as P0Parts, p1::Parts as P1Parts, Level},
         Rng, Timer,
     },
-    hardware_bringup::{self as _}, // global logger + panicking-behavior + memory layout
+    hardware_bringup as _, // global logger + panicking-behavior + memory layout
     nrf_smartled::pwm::Pwm,
     smart_leds::{colors, gamma, RGB8},
     smart_leds_trait::SmartLedsWrite,
 };
-
-use nrf52840_hal::prelude::OutputPin;
 
 const NUM_LEDS: usize = 10;
 
@@ -27,7 +25,7 @@ fn main() -> ! {
 
     let mut timer = Timer::new(board.TIMER0);
     let p0 = P0Parts::new(board.P0);
-    let p1 = P1Parts::new(board.P1);
+    let _p1 = P1Parts::new(board.P1);
 
     // P0_13<Disconnected>
 
