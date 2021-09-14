@@ -108,8 +108,14 @@ where
                     println!("yey");
                     break;
                 }
-                Ok(_) => println!("wtf?"),
-                Err(_) => println!("ohno"),
+                Ok(_) => {
+                    println!("wtf?");
+                    return Ok(None);
+                }
+                Err(_) => {
+                    println!("ohno");
+                    return Ok(None);
+                }
             }
         }
 
@@ -147,6 +153,8 @@ where
                 if success_ct >= 2 {
                     return Ok(Some(addr));
                 }
+            } else {
+                return Ok(None);
             }
         }
     }

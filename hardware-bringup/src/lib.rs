@@ -44,8 +44,9 @@ pub struct PowerBusPins {
     pub io_5: p1::P1_15<Disconnected>,
     pub io_6: p1::P1_13<Disconnected>,
     pub io_7: p0::P0_24<Disconnected>,
-    pub io_8: p0::P0_18<Disconnected>,
-    pub io_9: p0::P0_15<Disconnected>,
+
+    pub led_1: p0::P0_18<Disconnected>,
+    pub led_2: p0::P0_15<Disconnected>,
 
     // qwiic i2c (both 3v3 and 5v0 ports)
     pub i2c_scl: p0::P0_22<Disconnected>,
@@ -80,8 +81,9 @@ impl PowerBusPins {
             io_5: p1p.p1_15,
             io_6: p1p.p1_13,
             io_7: p0p.p0_24,
-            io_8: p0p.p0_18,
-            io_9: p0p.p0_15,
+
+            led_1: p0p.p0_18,
+            led_2: p0p.p0_15,
 
             i2c_scl: p0p.p0_22,
             i2c_sda: p0p.p0_20,

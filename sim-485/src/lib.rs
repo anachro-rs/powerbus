@@ -17,8 +17,8 @@ use std::{
 
 // TODO: NOT a constant frequency
 // const BUS_FREQUENCY_HZ: u64 = BITS_PER_DATA_BYTE * 1_000_000;
-// const BUS_FREQUENCY_HZ: u64 = 115200;
-const BUS_FREQUENCY_HZ: u64 = 8_000_000;
+const BUS_FREQUENCY_HZ: u64 = 115200;
+// const BUS_FREQUENCY_HZ: u64 = 8_000_000;
 
 // Assuming 8N1 UART mode
 const BITS_PER_DATA_BYTE: u64 = 9;

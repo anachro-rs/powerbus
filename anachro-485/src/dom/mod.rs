@@ -105,6 +105,9 @@ impl AddrTable32 {
         if (self.reserved & mask) == 0 {
             return Err(());
         }
+        if (self.active & mask) != 0 {
+            return Err(());
+        }
 
         self.reserved &= !mask;
         self.active |= mask;

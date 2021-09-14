@@ -27,6 +27,7 @@ where
     rand: A,
     boost_mode: bool,
     alloc: &'static BSlab<TOTAL_SLABS, SLAB_SIZE>,
+    last_disc: Option<u32>,
 }
 
 impl<R, A> Discovery<R, A>
@@ -46,19 +47,24 @@ where
             table: AddrTable32::new(),
             boost_mode: true,
             alloc,
+            last_disc: None,
         }
     }
 
     pub async fn poll(&mut self) -> ! {
         let timer = R::default();
-        let start = timer.get_ticks();
         self.boost_mode = true;
-        // self.boost_mode = false;
 
         loop {
-            if self.boost_mode && timer.millis_since(start) >= 10_000 {
-                self.boost_mode = false;
+            // Boost until we haven't heard from a new device in the
+            // last three seconds (once after boot)
+            if let Some(ld) = self.last_disc {
+                if self.boost_mode && timer.millis_since(ld) >= 3_000 {
+                    self.boost_mode = false;
+                    self.last_disc = None;
+                }
             }
+
 
             if !self.boost_mode {
                 async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
@@ -84,6 +90,8 @@ where
 
         if avail_addrs.is_empty() {
             return Err(());
+        } else {
+            println!("avail addrs: {}", avail_addrs.len());
         }
 
         // Broadcast initial
@@ -91,6 +99,7 @@ where
         if readies.is_empty() {
             return Ok(0);
         }
+        self.last_disc = Some(timer.get_ticks());
         println!("READIES: {:?}", readies);
 
         if !self.boost_mode {
@@ -112,7 +121,7 @@ where
 
         let table = &mut self.table;
         gos.iter()
-            .try_for_each(|g| table.commit_reserved_addr(*g))?;
+            .try_for_each(|g| table.commit_reserved_addr(*g)).unwrap();
 
         Ok(gos.len())
     }
@@ -165,6 +174,8 @@ where
                 results.push(*ready).map_err(drop)?;
             }
         }
+
+        println!("grepme: {:?}", results);
 
         Ok(results)
     }
