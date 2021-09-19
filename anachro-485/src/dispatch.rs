@@ -24,6 +24,7 @@ type MASlab = ManagedArcSlab<'static, TOTAL_SLABS, SLAB_SIZE>;
 
 pub struct TimeStampBox {
     pub packet: BBox,
+    pub len: usize,
     pub tick: u32,
 }
 
@@ -73,9 +74,15 @@ struct PortQueue {
 }
 
 pub struct IoQueue {
-    to_io: MpMcQueue<MASlab, IO_QUEUE_DEPTH>,
-    to_dispatch: MpMcQueue<TimeStampBox, IO_QUEUE_DEPTH>,
-    io_given: AtomicBool,
+    pub /* TODO */ to_io: MpMcQueue<MASlab, IO_QUEUE_DEPTH>,
+    pub /* TODO */ to_dispatch: MpMcQueue<TimeStampBox, IO_QUEUE_DEPTH>,
+    pub /* TODO */ io_given: AtomicBool,
+
+    // one shot
+    pub /* TODO */ io_send_auth: AtomicBool,
+
+    // continuous
+    pub /* TODO */ io_recv_auth: AtomicBool,
 }
 
 pub struct IoHandle {
@@ -83,6 +90,26 @@ pub struct IoHandle {
 }
 
 impl IoHandle {
+    pub fn enable_one_send(&mut self) {
+        self.ioq.io_send_auth.store(true, SeqCst);
+    }
+
+    pub fn is_send_authd(&mut self) -> bool {
+        self.ioq.io_send_auth.compare_exchange(true, false, SeqCst, SeqCst).is_ok()
+    }
+
+    pub fn enable_recv(&mut self) {
+        self.ioq.io_recv_auth.store(true, SeqCst);
+    }
+
+    pub fn disable_recv(&mut self) {
+        self.ioq.io_recv_auth.store(false, SeqCst);
+    }
+
+    pub fn is_recv_authd(&mut self) -> bool {
+        self.ioq.io_recv_auth.load(SeqCst)
+    }
+
     pub fn push_incoming(&mut self, tsb: TimeStampBox) -> Result<(), TimeStampBox> {
         self.ioq.to_dispatch.enqueue(tsb)
     }
@@ -98,9 +125,14 @@ impl IoQueue {
             to_io: MpMcQueue::new(),
             to_dispatch: MpMcQueue::new(),
             io_given: AtomicBool::new(false),
+            io_send_auth: AtomicBool::new(false),
+            io_recv_auth: AtomicBool::new(false),
         }
     }
 
+    // TODO: I need to probably have one for each half, the IoHandle
+    // (that goes to the hardware I/O), and for Dispatch (which for now
+    // just borrows the IoQ itself).
     pub fn take_io_handle(&'static self) -> Option<IoHandle> {
         self.io_given
             .compare_exchange(false, true, SeqCst, SeqCst)

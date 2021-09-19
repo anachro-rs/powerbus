@@ -1,0 +1,31 @@
+[package]
+name = "uarte-485"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+nrf52840-hal = "0.13.0"
+defmt = "0.2.3"
+
+[dependencies.byte-slab]
+path = "../byte-slab"
+
+[dependencies.anachro-485]
+path = "../anachro-485"
+
+[features]
+# set logging levels here
+default = [
+  "defmt-default",
+  # "dependency-a/defmt-trace",
+]
+
+# do NOT modify these features
+defmt-default = []
+defmt-trace = []
+defmt-debug = []
+defmt-info = []
+defmt-warn = []
+defmt-error = []

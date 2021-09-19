@@ -190,11 +190,11 @@ impl BusSubPayload {
             if *own_id_checksum == result {
                 Ok(())
             } else {
-                println!("BAD CKSM");
+                // println!("BAD CKSM");
                 Err(())
             }
         } else {
-            println!("WRONG MSG");
+            // println!("WRONG MSG");
             Err(())
         }
     }
@@ -215,7 +215,7 @@ impl BusSubPayload {
         {
             // Source address must match claim address
             if *own_id != addr {
-                println!("BAD ADDR");
+                // println!("BAD ADDR");
                 return Err(());
             }
 
@@ -225,11 +225,11 @@ impl BusSubPayload {
             if *own_id_rand_checksum == result {
                 Ok((addr, *own_random))
             } else {
-                println!("BAD CKSM");
+                // println!("BAD CKSM");
                 Err(())
             }
         } else {
-            println!("WRONG MSG");
+            // println!("WRONG MSG");
             Err(())
         }
     }

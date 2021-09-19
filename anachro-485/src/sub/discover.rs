@@ -46,10 +46,10 @@ where
     pub async fn obtain_addr(&mut self) -> Result<u8, ()> {
         loop {
             if let Some(addr) = self.obtain_addr_inner().await? {
-                println!("Addr obtained! {}", addr);
+                // println!("Addr obtained! {}", addr);
                 return Ok(addr);
             } else {
-                println!("Sub poll good, still working...");
+                // println!("Sub poll good, still working...");
             }
         }
     }
@@ -105,15 +105,15 @@ where
 
             match msg.body.validate_discover_ack_ack(&msg.hdr, sub_random) {
                 Ok(new_addr) if new_addr == addr => {
-                    println!("yey");
+                    // println!("yey");
                     break;
                 }
                 Ok(_) => {
-                    println!("wtf?");
+                    // println!("wtf?");
                     return Ok(None);
                 }
                 Err(_) => {
-                    println!("ohno");
+                    // println!("ohno");
                     return Ok(None);
                 }
             }
