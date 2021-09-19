@@ -2,7 +2,7 @@
 #![allow(unused_imports, dead_code)]
 
 use core::{
-    ops::DerefMut,
+    ops::{DerefMut, Deref},
     sync::atomic::{compiler_fence, Ordering::SeqCst},
 };
 
@@ -28,6 +28,7 @@ where
     pins: InternalPin485,
     state: State485,
     io_hdl: IoHandle,
+    has_rx_credit: bool,
 }
 
 enum State485 {
@@ -143,11 +144,97 @@ where
             pins,
             state: State485::Idle,
             io_hdl: ioh,
+            has_rx_credit: false,
+        }
+    }
+
+    pub fn debug_events(&self) {
+        if self.uarte.events_rxdrdy.read().events_rxdrdy().bit_is_set() {
+            defmt::info!("rxdrdy")
+        }
+        if self.uarte.events_endtx.read().events_endtx().bit_is_set() {
+            defmt::info!("endtx")
+        }
+        if self.uarte.events_txstopped.read().events_txstopped().bit_is_set() {
+            defmt::info!("txstopped")
+        }
+        if self.uarte.events_endrx.read().events_endrx().bit_is_set() {
+            defmt::info!("endrx")
         }
     }
 
     pub fn prepare_send(&mut self, msg: &UarteMas) {
-        defmt::todo!()
+        defmt::assert!(EASY_DMA_SIZE >= msg.len());
+
+        // GPIOs
+        {
+            self.pins.rs_re_n.set_high().ok();
+            self.pins.rs_de.set_high().ok();
+        }
+
+        // TIMERs
+        {
+            self.timer.disable_interrupt();
+            self.timer.timer_cancel();
+            self.timer.timer_reset_event();
+            self.channel.disable();
+        }
+
+        // UARTE
+        {
+            // Conservative compiler fence to prevent optimizations that do not
+            // take in to account actions by DMA. The fence has been placed here,
+            // before any DMA action has started
+            compiler_fence(SeqCst);
+
+            let tx_buffer: &[u8] = msg.deref();
+
+            // Reset the events.
+            self.uarte.events_endtx.reset();
+            self.uarte.events_txstopped.reset();
+            self.uarte.intenset.write(|w| w.endtx().set_bit());
+
+            // Set up the DMA write
+            self.uarte.txd.ptr.write(|w|
+                // We're giving the register a pointer to the stack. Since we're
+                // waiting for the UARTE transaction to end before this stack pointer
+                // becomes invalid, there's nothing wrong here.
+                //
+                // The PTR field is a full 32 bits wide and accepts the full range
+                // of values.
+                unsafe { w.ptr().bits(tx_buffer.as_ptr() as u32) });
+            self.uarte.txd.maxcnt.write(|w|
+                // We're giving it the length of the buffer, so no danger of
+                // accessing invalid memory. We have verified that the length of the
+                // buffer fits in an `u8`, so the cast to `u8` is also fine.
+                //
+                // The MAXCNT field is 8 bits wide and accepts the full range of
+                // values.
+                unsafe { w.maxcnt().bits(tx_buffer.len() as _) });
+
+            // Start UARTE Transmit transaction
+            self.uarte.tasks_starttx.write(|w|
+                // `1` is a valid value to write to task registers.
+                unsafe { w.bits(1) });
+        }
+    }
+
+    pub fn complete_send(&mut self, msg: &UarteMas) -> Result<(), ()> {
+        let endtx = self.uarte.events_endtx.read().events_endtx().bit_is_set();
+        if !endtx {
+            return Err(());
+        }
+
+        let sent = self.uarte.txd.amount.read().amount().bits() as usize;
+        defmt::assert_eq!(sent, msg.len());
+
+        self.uarte.intenclr.write(|w| w.endtx().set_bit());
+        self.uarte.events_endtx.reset();
+
+        self.pins.rs_re_n.set_high().ok();
+        self.pins.rs_de.set_low().ok();
+
+        Ok(())
     }
 
     pub fn prepare_recv_initial(&mut self, sbox: &mut UarteBox) {
@@ -292,9 +379,7 @@ where
         }
     }
 
-    pub fn complete_send(&mut self, msg: UarteMas) {
-        defmt::todo!()
-    }
+
 
     pub fn uarte_interrupt(&mut self) {
         loop {
@@ -308,13 +393,16 @@ where
     }
 
     fn uarte_interrupt_inner(&mut self) -> Again {
+        // self.debug_events();
         let mut again = Again::No;
         let mut old_state = State485::Invalid;
         core::mem::swap(&mut old_state, &mut self.state);
 
         self.state = match old_state {
-            State485::Idle if self.io_hdl.is_send_authd() => {
+            State485::Idle if self.has_rx_credit && self.io_hdl.is_send_authd() => {
                 if let Some(msg) = self.io_hdl.pop_outgoing() {
+                    self.io_hdl.clear_send_auth();
+                    self.has_rx_credit = false;
                     self.prepare_send(&msg);
                     State485::TxSending(msg)
                 } else {
@@ -344,13 +432,23 @@ where
             },
             State485::RxReceiving(sbox) => {
                 self.complete_recv(sbox);
+                defmt::info!("Done receiving.");
+                self.has_rx_credit = true;
                 again = Again::Yes;
                 State485::Idle
             },
             State485::TxSending(msg) => {
-                self.complete_send(msg);
-                again = Again::Yes;
-                State485::Idle
+                match self.complete_send(&msg) {
+                    Ok(_) => {
+                        again = Again::Yes;
+                        defmt::info!("Done sending.");
+                        State485::Idle
+                    }
+                    Err(_) => {
+                        State485::TxSending(msg)
+                    }
+                }
+
             },
             State485::Invalid => {
                 defmt::panic!("Invalid state in Uarte485!");

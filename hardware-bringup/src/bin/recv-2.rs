@@ -46,11 +46,22 @@ fn main() -> ! {
         led2.set_high().ok();
 
 
-        match serial.read_timeout(&mut buf[..5], &mut timer_2, 64_000_000) {
+        match serial.read_timeout(&mut buf, &mut timer_2, 100_000) {
             Ok(_) => {
                 let strng = defmt::unwrap!(core::str::from_utf8(&buf[..5]).map_err(drop));
                 defmt::info!("Got: {:?}", strng);
             },
+            Err(nrf52840_hal::uarte::Error::Timeout(0)) => { }
+            Err(nrf52840_hal::uarte::Error::Timeout(n)) => {
+                match core::str::from_utf8(&buf[..n]) {
+                    Ok(strng) => {
+                        defmt::info!("Got: {:?}", strng);
+                    }
+                    Err(_) => {
+                        defmt::warn!("Bad decode: {=usize} => {:?}", n, &buf[..n]);
+                    }
+                }
+            }
             Err(_) => {
                 defmt::warn!("Timeout :(");
             },
@@ -59,11 +70,22 @@ fn main() -> ! {
         led1.set_high().ok();
         led2.set_low().ok();
 
-        match serial.read_timeout(&mut buf[..5], &mut timer_2, 64_000_000) {
+        match serial.read_timeout(&mut buf, &mut timer_2, 100_000) {
             Ok(_) => {
                 let strng = defmt::unwrap!(core::str::from_utf8(&buf[..5]).map_err(drop));
                 defmt::info!("Got: {:?}", strng);
             },
+            Err(nrf52840_hal::uarte::Error::Timeout(0)) => { }
+            Err(nrf52840_hal::uarte::Error::Timeout(n)) => {
+                match core::str::from_utf8(&buf[..n]) {
+                    Ok(strng) => {
+                        defmt::info!("Got: {:?}", strng);
+                    }
+                    Err(_) => {
+                        defmt::warn!("Bad decode: {=usize}", n);
+                    }
+                }
+            }
             Err(_) => {
                 defmt::warn!("Timeout :(");
             },

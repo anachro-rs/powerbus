@@ -1,6 +1,7 @@
 #![no_main]
 #![no_std]
 
+use core::sync::atomic::Ordering::SeqCst;
 use hardware_bringup::{self as _, PowerBusPins};
 use nrf52840_hal::{
     gpio::Level,
@@ -13,7 +14,7 @@ use nrf52840_hal::{
 // use groundhog::RollingTimer;
 use anachro_485::dispatch::{IoHandle, IoQueue};
 use anachro_485::icd::{SLAB_SIZE, TOTAL_SLABS};
-use byte_slab::BSlab;
+use byte_slab::{BSlab, ManagedArcSlab};
 use groundhog_nrf52::GlobalRollingTimer;
 use uarte_485::{Pin485, Uarte485};
 
@@ -112,13 +113,40 @@ const APP: () = {
 
     #[idle]
     fn idle(ctx: idle::Context) -> ! {
-        IOQ.io_recv_auth.store(true, core::sync::atomic::Ordering::SeqCst);
+        IOQ.io_recv_auth.store(true, SeqCst);
         rtic::pend(Interrupt::UARTE0_UART0);
 
         loop {
             if let Some(msg) = IOQ.to_dispatch.dequeue() {
-                let strng = defmt::unwrap!(core::str::from_utf8(&msg.packet[..msg.len]).map_err(drop));
-                defmt::info!("Got: {:?}", strng);
+                let mut reply = false;
+                match core::str::from_utf8(&msg.packet[..msg.len]) {
+                    Ok(strng) => {
+                        defmt::info!("Got: {:?}", strng);
+                        reply = true;
+                    }
+                    Err(_) => {
+                        defmt::warn!("Bad decode: {=usize} => {:?}", msg.len, &msg.packet[..msg.len]);
+                    }
+                }
+
+                if reply {
+                    match BSLAB.alloc_box() {
+                        Some(mut sbox) => {
+                            const REPLY: &[u8] = b"->Pow!";
+                            sbox[..REPLY.len()].copy_from_slice(REPLY);
+
+                            let arc = sbox.into_arc();
+                            let ssa = arc.sub_slice_arc(0, REPLY.len()).unwrap();
+                            let mas = ManagedArcSlab::Owned(ssa);
+
+                            IOQ.to_io.enqueue(mas).unwrap();
+                            IOQ.io_send_auth.store(true, SeqCst);
+                        }
+                        None => {
+                            defmt::warn!("Tried to reply, no alloc :(");
+                        }
+                    }
+                }
             }
         }
     }

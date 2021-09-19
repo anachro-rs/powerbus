@@ -95,7 +95,11 @@ impl IoHandle {
     }
 
     pub fn is_send_authd(&mut self) -> bool {
-        self.ioq.io_send_auth.compare_exchange(true, false, SeqCst, SeqCst).is_ok()
+        self.ioq.io_send_auth.load(SeqCst)
+    }
+
+    pub fn clear_send_auth(&mut self) {
+        self.ioq.io_send_auth.store(false, SeqCst);
     }
 
     pub fn enable_recv(&mut self) {
