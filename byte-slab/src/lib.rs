@@ -55,7 +55,9 @@ impl<const N: usize, const SZ: usize> Drop for SlabBox<N, SZ> {
         assert!(zero.is_ok());
 
         // TODO: Why is this necessary?
-        while let Err(_) = self.slab.alloc_q.enqueue(self.idx) {}
+        if let Ok(q) = self.slab.get_q() {
+            while let Err(_) = q.enqueue(self.idx) {}
+        }
 
         // TODO: Zero on drop? As option?
     }
@@ -145,7 +147,10 @@ impl<const N: usize, const SZ: usize> Drop for SlabArc<N, SZ> {
 
         // We just dropped the refct to zero. Release the structure
         if refct == 1 {
-            while let Err(_) = self.slab.alloc_q.enqueue(self.idx) {}
+            if let Ok(q) = self.slab.get_q() {
+                while let Err(_) = q.enqueue(self.idx) {}
+            }
+
         }
     }
 }
@@ -324,7 +329,13 @@ unsafe impl<const N: usize, const SZ: usize> Send for SlabBox<N, SZ> {}
 pub struct BSlab<const N: usize, const SZ: usize> {
     bufs: MaybeUninit<[UnsafeCell<[u8; SZ]>; N]>,
     arcs: [AtomicUsize; N],
-    alloc_q: MpMcQueue<usize, N>,
+
+    // This unsafe abomination is because MpMc does not contain all zeroes
+    // at init time, which "infects" this structure, making the `bufs` also
+    // end up in `.data` instead of `.bss` which makes the firmware much
+    // larger, and the flashing much slower. This is a workaround to force
+    // the contents to be in `.bss`.
+    alloc_q: UnsafeCell<MaybeUninit<MpMcQueue<usize, N>>>,
     state: AtomicU8,
 }
 
@@ -344,8 +355,8 @@ impl<const N: usize, const SZ: usize> BSlab<N, SZ> {
         Self {
             bufs: MaybeUninit::uninit(),
             arcs: [ZERO_ARC; N],
-            alloc_q: MpMcQueue::new(),
-            state: AtomicU8::new(0),
+            alloc_q: UnsafeCell::new(MaybeUninit::uninit()),
+            state: AtomicU8::new(Self::UNINIT),
         }
     }
 
@@ -361,6 +372,13 @@ impl<const N: usize, const SZ: usize> BSlab<N, SZ> {
         }
     }
 
+    pub fn get_q(&self) -> Result<&MpMcQueue<usize, N>, ()> {
+        self.is_init()?;
+        unsafe {
+            Ok(&*(*self.alloc_q.get()).as_ptr())
+        }
+    }
+
     pub fn get_slabs(&self) -> Result<&[UnsafeCell<[u8; SZ]>], ()> {
         self.is_init()?;
         unsafe {
@@ -371,8 +389,7 @@ impl<const N: usize, const SZ: usize> BSlab<N, SZ> {
     }
 
     pub fn alloc_box(&'static self) -> Option<SlabBox<N, SZ>> {
-        self.is_init().ok()?;
-        let idx = self.alloc_q.dequeue()?;
+        let idx = self.get_q().ok()?.dequeue()?;
         let arc = unsafe { self.get_idx_unchecked(idx).arc };
 
         // Store a refcount of one. This box was not previously allocated,
@@ -401,6 +418,12 @@ impl<const N: usize, const SZ: usize> BSlab<N, SZ> {
             )
             .map_err(drop)?;
 
+        // Initialize the alloc_q
+        let good_q = unsafe {
+            (*self.alloc_q.get()).as_mut_ptr().write(MpMcQueue::new());
+            &*(*self.alloc_q.get()).as_ptr()
+        };
+
         // Initialize each slab to zero to prevent UB
         unsafe {
             let buf_ptr = self.bufs.as_ptr().cast::<UnsafeCell<[u8; SZ]>>();
@@ -413,7 +436,7 @@ impl<const N: usize, const SZ: usize> BSlab<N, SZ> {
 
         // Add all slabs to the allocation queue
         for i in 0..N {
-            self.alloc_q.enqueue(i).map_err(drop)?;
+            good_q.enqueue(i).map_err(drop)?;
         }
 
         // Complete initialization. Returns an error if the slab was not previously
