@@ -74,46 +74,44 @@ struct PortQueue {
 }
 
 pub struct IoQueue {
-    pub /* TODO */ to_io: MpMcQueue<MASlab, IO_QUEUE_DEPTH>,
-    pub /* TODO */ to_dispatch: MpMcQueue<TimeStampBox, IO_QUEUE_DEPTH>,
-    pub /* TODO */ io_given: AtomicBool,
+    /// A queue of serialized messages sent to the IO handler
+    to_io: MpMcQueue<MASlab, IO_QUEUE_DEPTH>,
 
-    // one shot
-    pub /* TODO */ io_send_auth: AtomicBool,
+    /// A queue of incoming, serialized messages sent to the
+    /// dispatch handler
+    to_dispatch: MpMcQueue<TimeStampBox, IO_QUEUE_DEPTH>,
 
-    // continuous
-    pub /* TODO */ io_recv_auth: AtomicBool,
+    /// Has the IO Handle been given out already?
+    io_given: AtomicBool,
+
+    io_auth: IoAuth,
 }
 
+/// The control and queue handle, intended to be driven by the IO Handler
 pub struct IoHandle {
     ioq: &'static IoQueue,
 }
 
+pub struct IoAuth {
+    /// Is the IO handler authorized to send a message at will?
+    ///
+    /// This flag is cleared after sending a single message.
+    ///
+    /// TODO: The dom basically always is authorized, while the
+    /// sub is the one that needs to wait to be authorized. How
+    /// to handle this?
+    io_send_auth: AtomicBool,
+
+    io_is_discovering: AtomicBool,
+
+    /// Is the IO handler authorized to receive a message?
+    ///
+    /// This is generally "sticky", and will stay enabled until
+    /// manually disabled.
+    io_recv_auth: AtomicBool,
+}
+
 impl IoHandle {
-    pub fn enable_one_send(&mut self) {
-        self.ioq.io_send_auth.store(true, SeqCst);
-    }
-
-    pub fn is_send_authd(&mut self) -> bool {
-        self.ioq.io_send_auth.load(SeqCst)
-    }
-
-    pub fn clear_send_auth(&mut self) {
-        self.ioq.io_send_auth.store(false, SeqCst);
-    }
-
-    pub fn enable_recv(&mut self) {
-        self.ioq.io_recv_auth.store(true, SeqCst);
-    }
-
-    pub fn disable_recv(&mut self) {
-        self.ioq.io_recv_auth.store(false, SeqCst);
-    }
-
-    pub fn is_recv_authd(&mut self) -> bool {
-        self.ioq.io_recv_auth.load(SeqCst)
-    }
-
     pub fn push_incoming(&mut self, tsb: TimeStampBox) -> Result<(), TimeStampBox> {
         self.ioq.to_dispatch.enqueue(tsb)
     }
@@ -123,14 +121,54 @@ impl IoHandle {
     }
 }
 
+impl IoAuth {
+    pub fn enable_one_send(&self) {
+        if !self.io_is_discovering.load(SeqCst) {
+            self.io_send_auth.store(true, SeqCst);
+        }
+    }
+
+    pub fn set_discovering_auth(&self) {
+        self.io_is_discovering.store(true, SeqCst);
+        self.io_send_auth.store(true, SeqCst);
+    }
+
+    pub fn clear_discovering(&self) {
+        self.io_is_discovering.store(false, SeqCst);
+    }
+
+    pub fn is_send_authd(&self) -> bool {
+        self.io_send_auth.load(SeqCst)
+    }
+
+    pub fn clear_send_auth(&self) {
+        self.io_send_auth.store(false, SeqCst);
+    }
+
+    pub fn enable_recv(&self) {
+        self.io_recv_auth.store(true, SeqCst);
+    }
+
+    pub fn disable_recv(&self) {
+        self.io_recv_auth.store(false, SeqCst);
+    }
+
+    pub fn is_recv_authd(&self) -> bool {
+        self.io_recv_auth.load(SeqCst)
+    }
+}
+
 impl IoQueue {
     pub const fn new() -> Self {
         Self {
             to_io: MpMcQueue::new(),
             to_dispatch: MpMcQueue::new(),
             io_given: AtomicBool::new(false),
-            io_send_auth: AtomicBool::new(false),
-            io_recv_auth: AtomicBool::new(false),
+            io_auth: IoAuth {
+                io_send_auth: AtomicBool::new(false),
+                io_recv_auth: AtomicBool::new(false),
+                io_is_discovering: AtomicBool::new(false),
+            },
         }
     }
 
@@ -200,6 +238,15 @@ impl<const PORTS: usize> Dispatch<PORTS> {
         self.own_addr.store(addr, SeqCst);
     }
 
+    pub fn get_addr(&self) -> Option<u8> {
+        let addr = self.own_addr.load(SeqCst);
+        if addr == INVALID_OWN_ADDR {
+            None
+        } else {
+            Some(addr)
+        }
+    }
+
     /// Register a port, and receive a socket for the corresponding port.
     /// It will return None if:
     ///
@@ -224,6 +271,14 @@ impl<const PORTS: usize> Dispatch<PORTS> {
             return None;
         }
 
+        // Should this port have the ability to authorize outgoing messages?
+        //
+        // Generally limited to management messages and discovery messsages
+        let auth = match port {
+            crate::dom::MANAGEMENT_PORT => Some(&self.ioq.io_auth),
+            _ => None
+        };
+
         // Try to find a free port.
         self.ports
             .iter()
@@ -239,6 +294,7 @@ impl<const PORTS: usize> Dispatch<PORTS> {
                     port: nzport,
                     to_task: &slot.to_task,
                     to_dispatch: &slot.to_dispatch,
+                    send_auth: auth
                 }
             })
     }
@@ -420,6 +476,7 @@ pub struct DispatchSocket<'a> {
     port: NonZeroU16,
     to_task: &'a MpMcQueue<LocalPacket, TASK_QUEUE_DEPTH>,
     to_dispatch: &'a MpMcQueue<LocalPacket, TASK_QUEUE_DEPTH>,
+    send_auth: Option<&'a IoAuth>
 }
 
 impl<'a> DispatchSocket<'a> {
@@ -427,8 +484,40 @@ impl<'a> DispatchSocket<'a> {
         self.to_dispatch.enqueue(pkt)
     }
 
+    pub fn try_send_authd(&self, pkt: LocalPacket) -> Result<(), LocalPacket> {
+        match self.send_auth {
+            Some(auth) => {
+                self.try_send(pkt)?;
+                auth.enable_one_send();
+                Ok(())
+            },
+            None => Err(pkt),
+        }
+    }
+
+    pub fn try_send_discover_authd(&self, pkt: LocalPacket) -> Result<(), LocalPacket> {
+        match self.send_auth {
+            Some(auth) => {
+                self.try_send(pkt)?;
+                auth.set_discovering_auth();
+                Ok(())
+            },
+            None => Err(pkt),
+        }
+    }
+
+    pub fn clear_discover(&self) {
+        self.send_auth.map(|auth| auth.clear_discovering());
+    }
+
     pub fn try_recv(&self) -> Option<LocalPacket> {
         self.to_task.dequeue()
+    }
+
+    pub fn auth_send(&self) -> Result<(), ()> {
+        self.send_auth
+            .map(|auth| auth.enable_one_send())
+            .ok_or(())
     }
 
     pub fn port(&self) -> NonZeroU16 {

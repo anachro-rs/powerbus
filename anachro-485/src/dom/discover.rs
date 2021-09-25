@@ -72,7 +72,12 @@ where
                 async_sleep_millis::<R>(timer.get_ticks(), 10u32).await;
             }
 
-            match self.poll_inner().await {
+            let ret = self.poll_inner().await;
+            // Make sure we clear the discovery flag, in case we errored out early before
+            // naturally clearing it
+            self.socket.clear_discover();
+
+            match ret {
                 Ok(0) => {
                     if !self.boost_mode {
                         async_sleep_millis::<R>(timer.get_ticks(), 2000u32).await;
@@ -100,6 +105,7 @@ where
 
         // Broadcast initial
         let readies = self.broadcast_initial(&avail_addrs).await?;
+        self.socket.clear_discover();
         if readies.is_empty() {
             return Ok(0);
         }
@@ -111,6 +117,7 @@ where
         }
 
         let steadies = self.ping_readies(&readies).await?;
+        self.socket.clear_discover();
         // println!("STEADIES: {:?}", steadies);
         if steadies.is_empty() {
             return Ok(0);
@@ -121,6 +128,7 @@ where
         }
 
         let gos = self.ping_readies(&steadies).await?;
+        self.socket.clear_discover();
         // println!("GOs: {:?}", gos);
 
         let table = &mut self.table;
@@ -151,7 +159,7 @@ where
             )
             .ok_or(())?;
 
-            self.socket.try_send(msg).map_err(drop)?;
+            self.socket.try_send_discover_authd(msg).map_err(drop)?;
             let start = timer.get_ticks();
 
             'inner: loop {
@@ -204,7 +212,7 @@ where
         )
         .ok_or(())?;
         // println!("BROADCAST!");
-        self.socket.try_send(msg).map_err(drop)?;
+        self.socket.try_send_discover_authd(msg).map_err(drop)?;
 
         // Start the receive
         let start = timer.get_ticks();
@@ -288,7 +296,7 @@ where
                 )
                 .ok_or(())?;
 
-                self.socket.try_send(msg).map_err(drop)?;
+                self.socket.try_send_discover_authd(msg).map_err(drop)?;
             }
         }
 
