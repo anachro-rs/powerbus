@@ -24,6 +24,7 @@ libm = "0.2.1"
 embedded-hal = "0.2.4"
 choreographer = "0.0.4"
 cortex-m-rtic = "0.5.8"
+cassette = "0.2.3"
 
 [dependencies.uarte-485]
 path = "../uarte-485"

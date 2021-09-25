@@ -1,7 +1,3 @@
-use crate::dispatch::{Dispatch, DispatchSocket};
-
-// TODO: `no_std`
-
 use heapless::Vec;
 
 pub mod discover;
@@ -135,48 +131,60 @@ impl AddrTable32 {
 
 pub const NUM_PORTS: usize = 8;
 pub const MANAGEMENT_PORT: u16 = 10;
-use cassette::Cassette;
 
-pub struct DomHandle<T>
-where
-    T: core::future::Future + Unpin,
-{
-    dispatch: &'static Dispatch<NUM_PORTS>,
-    bus_mgmt_port: DispatchSocket<'static>,
-    boo: Cassette<T>,
-}
+#[cfg(TODO)]
+mod todo {
+    // TODO: This is a WIP to figure out how I can more easily
+    // define all the moving parts of a dom/sub using macros.
+    //
+    // Right now, this requires declaring a bunch of pinned and
+    // cassette'd futures, and polling them in a sort of round
+    // robin'd pattern.
 
-impl<T> DomHandle<T>
-where
-    T: core::future::Future + Unpin,
-{
-    pub fn new(dispatch: &'static Dispatch<NUM_PORTS>, b: T) -> Option<Self> {
-        let port = dispatch.register_port(MANAGEMENT_PORT)?;
+    use cassette::Cassette;
+    use crate::dispatch::{Dispatch, DispatchSocket};
 
-        Some(Self {
-            dispatch,
-            bus_mgmt_port: port,
-            boo: Cassette::new(b),
-        })
+    pub struct DomHandle<T>
+    where
+        T: core::future::Future + Unpin,
+    {
+        dispatch: &'static Dispatch<NUM_PORTS>,
+        bus_mgmt_port: DispatchSocket<'static>,
+        boo: Cassette<T>,
     }
 
-    pub fn poll(&mut self) {
-        self.boo.poll_on();
+    impl<T> DomHandle<T>
+    where
+        T: core::future::Future + Unpin,
+    {
+        pub fn new(dispatch: &'static Dispatch<NUM_PORTS>, b: T) -> Option<Self> {
+            let port = dispatch.register_port(MANAGEMENT_PORT)?;
+
+            Some(Self {
+                dispatch,
+                bus_mgmt_port: port,
+                boo: Cassette::new(b),
+            })
+        }
+
+        pub fn poll(&mut self) {
+            self.boo.poll_on();
+        }
     }
-}
 
-pub async fn weeew() -> Result<u8, ()> {
-    Ok(42)
-}
+    pub async fn weeew() -> Result<u8, ()> {
+        Ok(42)
+    }
 
-#[macro_export]
-macro_rules! declare_dom {
-    ({
-        name: $name:ident,
-        dispatch: $dispatch:ident,
-    }) => {
-        let test_fut = $crate::dom::weeew();
-        pin_mut!(test_fut);
-        let mut $name = $crate::dom::DomHandle::new(&$dispatch, test_fut).unwrap();
-    };
+    #[macro_export]
+    macro_rules! declare_dom {
+        ({
+            name: $name:ident,
+            dispatch: $dispatch:ident,
+        }) => {
+            let test_fut = $crate::dom::weeew();
+            pin_mut!(test_fut);
+            let mut $name = $crate::dom::DomHandle::new(&$dispatch, test_fut).unwrap();
+        };
+    }
 }

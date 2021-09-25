@@ -265,14 +265,14 @@ impl<const PORTS: usize> Dispatch<PORTS> {
             // NOTE: This is important before we are assigned an address!
             // (and after, because we use broadcast as the 'invalid' own
             // addr)
-            Some(LOCAL_BROADCAST_ADDR) => {}
+            Some(LOCAL_BROADCAST_ADDR) => Ok(()),
 
             // Accept messages to us
-            Some(addr) if addr == own_addr => {}
+            Some(addr) if addr == own_addr => Ok(()),
 
             // Reject all others
-            _ => return Err(ProcessMessageError::DestAddr),
-        }
+            _ => Err(ProcessMessageError::DestAddr),
+        }?;
 
         let good = lm
             .hdr
@@ -337,6 +337,25 @@ impl<const PORTS: usize> Dispatch<PORTS> {
         }
 
         // TODO: not really fair, gives prio to lower port numbers
+        // TODO: Is this a feature?
+        //
+        // TODO: Hmm, I think this may end up being a problem, or
+        // something to deal with. When we need to respond to a SPECIFIC
+        // message, like a bus management message, we may instead need to
+        // reply with a SPECIFIC response. However, if we've already filled
+        // the queue with lower priority messages, there's not much
+        // we can do to bypass, other than (hackily) draining the queue
+        // first.
+        //
+        // I wonder how I could handle this, either having MULTIPLE
+        // queues (ehhh?) and change the auth flag to auth a specific
+        // port? or a priority queue?
+        //
+        // this is a *little* less problematic for now, where discovery
+        // is divergent from actual behavor, but eventually we will have
+        // a dom that wants to do other stuff, and even just doing
+        // periodic discovery may cause problems, with the totally
+        // blocking nature of sending.
         'port: for pq in self.ports.iter() {
             loop {
                 // check if there is an allocation available FIRST, to avoid
