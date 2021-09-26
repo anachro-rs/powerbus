@@ -29,6 +29,7 @@ where
     state: State485,
     io_hdl: IoHandle,
     has_rx_credit: bool,
+    timeout: bool,
 }
 
 enum State485 {
@@ -145,6 +146,7 @@ where
             state: State485::Idle,
             io_hdl: ioh,
             has_rx_credit: false,
+            timeout: false,
         }
     }
 
@@ -248,6 +250,15 @@ where
             self.channel.disable();
         }
 
+        // Manage timer
+        {
+            // This is the timer that triggers when idle
+            self.timer.enable_interrupt();
+
+            // TODO: Don't hardcode 1000us
+            self.timer.timer_start(1000u32);
+        }
+
         // Manage gpios
         {
             self.pins.rs_de.set_low().ok();
@@ -310,6 +321,8 @@ where
 
         // Manage timer
         {
+            self.timer.timer_cancel();
+
             // This is the timer that triggers when idle
             self.timer.enable_interrupt();
 
@@ -421,6 +434,14 @@ where
                 warn!("Idle to idle transition? Why?");
                 State485::Idle
             },
+            State485::RxAwaitFirstByte(sbox) if self.timeout => {
+                drop(sbox);
+                again = Again::Yes;
+                warn!("Initial RX timeout");
+                self.timer.disable_interrupt();
+                self.timer.timer_cancel();
+                State485::Idle
+            }
             State485::RxAwaitFirstByte(sbox) => {
                 match self.prepare_steady_recv() {
                     Ok(_) => State485::RxReceiving(sbox),
@@ -455,10 +476,14 @@ where
             },
         };
 
+        self.timeout = false;
+
         again
     }
 
-    pub fn timer_interrupt(&mut self) {}
+    pub fn timer_interrupt(&mut self) {
+        self.timeout = true;
+    }
 }
 
 pub trait Uarte485Instance: UarteInstance {

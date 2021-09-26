@@ -39,6 +39,7 @@ path = "../byte-slab"
 # set logging levels here
 default = [
   "defmt-default",
+  "uarte-485/defmt-info",
   # "dependency-a/defmt-trace",
 ]
 

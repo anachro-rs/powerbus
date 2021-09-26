@@ -481,7 +481,7 @@ impl<const PORTS: usize> Dispatch<PORTS> {
             .map_err(|_| ProcessMessageError::Arc)?;
 
         if port == crate::dom::MANAGEMENT_PORT {
-            self.ioq.to_io_hi_prio.enqueue(ManagedArcSlab::Owned(ssa)).unwrap();
+            self.ioq.to_io_hi_prio.enqueue(ManagedArcSlab::Owned(ssa)).ok();
             Ok(())
         } else {
             self.ioq

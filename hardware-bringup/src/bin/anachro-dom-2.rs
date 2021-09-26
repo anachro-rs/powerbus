@@ -92,11 +92,11 @@ const APP: () = {
         let mut cas_dom_disco = Cassette::new(dom_disco_future);
 
         loop {
-            // Process messages
-            ctx.resources.dispatch.process_messages();
-
             // Check the actual tasks
             cas_dom_disco.poll_on();
+
+            // Process messages
+            ctx.resources.dispatch.process_messages();
 
             // if let Some(msg) = IOQ.to_dispatch.dequeue() {
             //     let mut reply = false;
@@ -138,10 +138,11 @@ const APP: () = {
         ctx.resources.usart.uarte_interrupt();
     }
 
-    #[task(binds = TIMER2)]
-    fn timer(_ctx: timer::Context) {
+    #[task(binds = TIMER2, resources = [usart])]
+    fn timer(ctx: timer::Context) {
         // TODO: It looks like we might have a spurious timer interrupt?
         // defmt::warn!("INT: timer");
+        ctx.resources.usart.timer_interrupt();
         rtic::pend(Interrupt::UARTE0_UART0);
     }
 };
