@@ -1,7 +1,6 @@
 #![no_main]
 #![no_std]
 
-use core::sync::atomic::Ordering::SeqCst;
 use hardware_bringup::{self as _, PowerBusPins};
 use nrf52840_hal::{
     gpio::Level,
@@ -76,7 +75,6 @@ const APP: () = {
 
     #[idle(resources = [dispatch, opt_rng])]
     fn idle(ctx: idle::Context) -> ! {
-        IOQ.io_recv_auth.store(true, SeqCst);
         rtic::pend(Interrupt::UARTE0_UART0);
 
         let rand = ctx.resources.opt_rng.take().unwrap();

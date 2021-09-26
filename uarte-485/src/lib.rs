@@ -399,9 +399,9 @@ where
         core::mem::swap(&mut old_state, &mut self.state);
 
         self.state = match old_state {
-            State485::Idle if self.has_rx_credit && self.io_hdl.is_send_authd() => {
+            State485::Idle if self.has_rx_credit && self.io_hdl.auth().is_send_authd() => {
                 if let Some(msg) = self.io_hdl.pop_outgoing() {
-                    self.io_hdl.clear_send_auth();
+                    self.io_hdl.auth().clear_send_auth();
                     self.has_rx_credit = false;
                     self.prepare_send(&msg);
                     State485::TxSending(msg)
@@ -409,7 +409,7 @@ where
                     defmt::panic!("Send authorized but no packet?")
                 }
             },
-            State485::Idle if self.io_hdl.is_recv_authd() => {
+            State485::Idle if self.io_hdl.auth().is_recv_authd() => {
                 if let Some(mut sbox) = self.alloc.alloc_box() {
                     self.prepare_recv_initial(&mut sbox);
                     State485::RxAwaitFirstByte(sbox)

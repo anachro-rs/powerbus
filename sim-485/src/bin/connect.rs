@@ -1,15 +1,14 @@
 use std::{
     iter::FromIterator,
     ops::Deref,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex},
     thread::{sleep, spawn, JoinHandle},
     time::Duration,
 };
 
 use anachro_485::{
-    declare_dom,
     dispatch::{Dispatch, IoQueue, TimeStampBox},
-    dom::{discover::Discovery as DomDiscovery, DomHandle, MANAGEMENT_PORT},
+    dom::{discover::Discovery as DomDiscovery, MANAGEMENT_PORT},
     icd::{SLAB_SIZE, TOTAL_SLABS},
     sub::discover::Discovery as SubDiscovery,
 };
@@ -166,6 +165,7 @@ fn make_me_a_dom(arc_bus: &Arc<Rs485Bus>) -> DevHdl {
                     io_hdl
                         .push_incoming(TimeStampBox {
                             packet: sbox,
+                            len: pos,
                             tick: timer.get_ticks(),
                         })
                         .map_err(drop)
@@ -290,6 +290,7 @@ fn make_me_a_sub(arc_bus: &Arc<Rs485Bus>) -> DevHdl {
                         .push_incoming(TimeStampBox {
                             packet: sbox,
                             tick: timer.get_ticks(),
+                            len: pos,
                         })
                         .map_err(drop)
                         .unwrap();

@@ -139,7 +139,7 @@ mod todo {
     //
     // Right now, this requires declaring a bunch of pinned and
     // cassette'd futures, and polling them in a sort of round
-    // robin'd pattern.
+    // robin'd
 
     use cassette::Cassette;
     use crate::dispatch::{Dispatch, DispatchSocket};

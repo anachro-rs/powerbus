@@ -1,6 +1,6 @@
 // Okay, what do we have here. Let's get back to layers:
 
-#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(any(test, feature = "std")), no_std)]
 
 pub mod dispatch;
 pub mod dom;

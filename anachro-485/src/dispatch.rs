@@ -77,6 +77,9 @@ pub struct IoQueue {
     /// A queue of serialized messages sent to the IO handler
     to_io: MpMcQueue<MASlab, IO_QUEUE_DEPTH>,
 
+    /// A queue of serialized messages sent to the IO handler
+    to_io_hi_prio: MpMcQueue<MASlab, IO_QUEUE_DEPTH>,
+
     /// A queue of incoming, serialized messages sent to the
     /// dispatch handler
     to_dispatch: MpMcQueue<TimeStampBox, IO_QUEUE_DEPTH>,
@@ -117,7 +120,21 @@ impl IoHandle {
     }
 
     pub fn pop_outgoing(&mut self) -> Option<MASlab> {
-        self.ioq.to_io.dequeue()
+        match self.ioq.to_io_hi_prio.dequeue() {
+            a @ Some(_) => a,
+            None => {
+                if !self.ioq.io_auth.io_is_discovering.load(SeqCst) {
+                    self.ioq.to_io.dequeue()
+                } else {
+                    None
+                }
+
+            }
+        }
+    }
+
+    pub fn auth(&self) -> &IoAuth {
+        &self.ioq.io_auth
     }
 }
 
@@ -162,11 +179,12 @@ impl IoQueue {
     pub const fn new() -> Self {
         Self {
             to_io: MpMcQueue::new(),
+            to_io_hi_prio: MpMcQueue::new(),
             to_dispatch: MpMcQueue::new(),
             io_given: AtomicBool::new(false),
             io_auth: IoAuth {
                 io_send_auth: AtomicBool::new(false),
-                io_recv_auth: AtomicBool::new(false),
+                io_recv_auth: AtomicBool::new(true),
                 io_is_discovering: AtomicBool::new(false),
             },
         }
@@ -462,13 +480,18 @@ impl<const PORTS: usize> Dispatch<PORTS> {
             .sub_slice_arc(0, len)
             .map_err(|_| ProcessMessageError::Arc)?;
 
-        self.ioq
-            .to_io
-            .enqueue(ManagedArcSlab::Owned(ssa))
-            .map_err(|ssa| {
-                self.shame.enqueue(ssa).ok();
-                ProcessMessageError::IoQueueFull
-            })
+        if port == crate::dom::MANAGEMENT_PORT {
+            self.ioq.to_io_hi_prio.enqueue(ManagedArcSlab::Owned(ssa)).unwrap();
+            Ok(())
+        } else {
+            self.ioq
+                .to_io
+                .enqueue(ManagedArcSlab::Owned(ssa))
+                .map_err(|ssa| {
+                    self.shame.enqueue(ssa).ok();
+                    ProcessMessageError::IoQueueFull
+                })
+        }
     }
 }
 

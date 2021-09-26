@@ -91,7 +91,7 @@ where
         let msg =
             LocalPacket::from_parts_with_alloc(resp.body, resp.hdr.src, resp.hdr.dst, self.alloc)
                 .ok_or(())?;
-        self.socket.try_send(msg).map_err(drop)?;
+        self.socket.try_send_authd(msg).map_err(drop)?;
 
         let start = timer.get_ticks();
         loop {
@@ -147,7 +147,7 @@ where
                     self.alloc,
                 )
                 .ok_or(())?;
-                self.socket.try_send(msg).map_err(drop)?;
+                self.socket.try_send_authd(msg).map_err(drop)?;
 
                 success_ct += 1;
                 if success_ct >= 2 {

@@ -84,10 +84,10 @@ where
                     }
                 }
                 Ok(_) => {
-                    // println!("Poll good!")
+                    #[cfg(feature = "std")] println!("Poll good!")
                 }
                 Err(_) => {
-                    // println!("Poll bad!")
+                    #[cfg(feature = "std")] println!("Poll bad!")
                 }
             }
         }
@@ -100,7 +100,7 @@ where
         if avail_addrs.is_empty() {
             return Err(());
         } else {
-            // println!("avail addrs: {}", avail_addrs.len());
+            #[cfg(feature = "std")] println!("avail addrs: {}", avail_addrs.len());
         }
 
         // Broadcast initial
@@ -110,7 +110,7 @@ where
             return Ok(0);
         }
         self.last_disc = Some(timer.get_ticks());
-        // println!("READIES: {:?}", readies);
+        #[cfg(feature = "std")] println!("READIES: {:?}", readies);
 
         if !self.boost_mode {
             async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
@@ -118,7 +118,7 @@ where
 
         let steadies = self.ping_readies(&readies).await?;
         self.socket.clear_discover();
-        // println!("STEADIES: {:?}", steadies);
+        #[cfg(feature = "std")] println!("STEADIES: {:?}", steadies);
         if steadies.is_empty() {
             return Ok(0);
         }
@@ -129,7 +129,7 @@ where
 
         let gos = self.ping_readies(&steadies).await?;
         self.socket.clear_discover();
-        // println!("GOs: {:?}", gos);
+        #[cfg(feature = "std")] println!("GOs: {:?}", gos);
 
         let table = &mut self.table;
         gos.iter()
@@ -182,12 +182,12 @@ where
             }
 
             if got {
-                // println!("yey!!!: {}", ready);
+                #[cfg(feature = "std")] println!("yey!!!: {}", ready);
                 results.push(*ready).map_err(drop)?;
             }
         }
 
-        // println!("grepme: {:?}", results);
+        #[cfg(feature = "std")] println!("grepme: {:?}", results);
 
         Ok(results)
     }
@@ -211,7 +211,7 @@ where
             self.alloc,
         )
         .ok_or(())?;
-        // println!("BROADCAST!");
+        #[cfg(feature = "std")] println!("BROADCAST!");
         self.socket.try_send_discover_authd(msg).map_err(drop)?;
 
         // Start the receive
@@ -231,7 +231,7 @@ where
             }
         }
 
-        // // println!("DOM RESPS: {:?}", resps);
+        // println!("DOM RESPS: {:?}", resps);
 
         let mut offered = FnvIndexSet::<u8, 32>::new();
         let mut seen = FnvIndexSet::<u8, 32>::new();
@@ -249,7 +249,7 @@ where
             resps
                 .iter()
                 // Remove any items that don't check out
-                // .inspect(|r| // println!("START: {:?}", r))
+                // .inspect(|r| println!("START: {:?}", r))
                 .filter_map(|resp| {
                     resp.body
                         .validate_discover_ack_addr(&resp.hdr, dom_random)
@@ -270,20 +270,20 @@ where
                 .filter_map(Result::<_, u8>::ok),
         );
 
-        // println!("RPs: {:?}", response_pairs);
-        // println!("DUPES: {:?}", dupes);
+        #[cfg(feature = "std")] println!("RPs: {:?}", response_pairs);
+        #[cfg(feature = "std")] println!("DUPES: {:?}", dupes);
 
         // Remove any duplicates that have been seen
         dupes.iter().for_each(|d| {
             let _ = response_pairs.remove(d);
         });
 
-        // println!("RPs: {:?}", response_pairs);
+        #[cfg(feature = "std")] println!("RPs: {:?}", response_pairs);
 
         let mut accepted = Vec::<u8, 32>::new();
         // ACK acceptable response pairs
         for (addr, sub_random) in response_pairs.iter() {
-            // println!("ACCEPTING: {:?}", addr);
+            #[cfg(feature = "std")] println!("ACCEPTING: {:?}", addr);
             if let Ok(_) = accepted.push(*addr) {
                 let msg =
                     BusDomPayload::generate_discover_ack_ack(*addr, self.rand.gen(), *sub_random);
