@@ -8,6 +8,7 @@ edition = "2018"
 [dependencies]
 nrf52840-hal = "0.13.0"
 defmt = "0.2.3"
+groundhog = "0.2.5"
 
 [dependencies.byte-slab]
 path = "../byte-slab"

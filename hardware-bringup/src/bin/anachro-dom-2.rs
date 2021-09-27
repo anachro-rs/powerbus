@@ -14,7 +14,7 @@ use anachro_485::{dispatch::{IoQueue, Dispatch}, dom::MANAGEMENT_PORT};
 use anachro_485::icd::{SLAB_SIZE, TOTAL_SLABS};
 use byte_slab::BSlab;
 use groundhog_nrf52::GlobalRollingTimer;
-use uarte_485::{Pin485, Uarte485};
+use uarte_485::{Pin485, Uarte485, DefaultTo};
 
 use anachro_485::dom::discover::Discovery;
 use cassette::{pin_mut, Cassette};
@@ -25,7 +25,7 @@ static BSLAB: BSlab<TOTAL_SLABS, SLAB_SIZE> = BSlab::new();
 #[rtic::app(device = nrf52840_hal::pac, peripherals = true, monotonic = groundhog_nrf52::GlobalRollingTimer)]
 const APP: () = {
     struct Resources {
-        usart: Uarte485<TIMER2, Ppi3, UARTE0>,
+        usart: Uarte485<TIMER2, Ppi3, UARTE0, GlobalRollingTimer>,
         dispatch: Dispatch<8>,
         opt_rng: Option<Rng>,
     }
@@ -33,7 +33,7 @@ const APP: () = {
     #[init]
     fn init(cx: init::Context) -> init::LateResources {
         defmt::info!("Hello, world!");
-        defmt::info!("Receiving on Port 1 (Bus)");
+        defmt::info!("Dom on Port 2 (Cap)");
         BSLAB.init().unwrap();
 
         let board = cx.device;
@@ -64,6 +64,7 @@ const APP: () = {
                 rs_re_n: pins.rs2_re_n.degrade(),
             },
             IOQ.take_io_handle().unwrap(),
+            DefaultTo::Sending,
         );
 
         let dispatch: Dispatch<8> = Dispatch::new(&IOQ, &BSLAB);
@@ -143,6 +144,5 @@ const APP: () = {
         // TODO: It looks like we might have a spurious timer interrupt?
         // defmt::warn!("INT: timer");
         ctx.resources.usart.timer_interrupt();
-        rtic::pend(Interrupt::UARTE0_UART0);
     }
 };

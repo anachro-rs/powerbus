@@ -89,7 +89,7 @@ where
         async_sleep_micros::<R>(timer.get_ticks(), delay).await;
 
         let msg =
-            LocalPacket::from_parts_with_alloc(resp.body, resp.hdr.src, resp.hdr.dst, self.alloc)
+            LocalPacket::from_parts_with_alloc(resp.body, resp.hdr.src, resp.hdr.dst, None, self.alloc)
                 .ok_or(())?;
         self.socket.try_send_authd(msg).map_err(drop)?;
 
@@ -144,6 +144,7 @@ where
                     resp.body,
                     resp.hdr.src,
                     resp.hdr.dst,
+                    None,
                     self.alloc,
                 )
                 .ok_or(())?;

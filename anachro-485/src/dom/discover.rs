@@ -73,9 +73,6 @@ where
             }
 
             let ret = self.poll_inner().await;
-            // Make sure we clear the discovery flag, in case we errored out early before
-            // naturally clearing it
-            self.socket.clear_discover();
 
             match ret {
                 Ok(0) => {
@@ -105,7 +102,6 @@ where
 
         // Broadcast initial
         let readies = self.broadcast_initial(&avail_addrs).await?;
-        self.socket.clear_discover();
         if readies.is_empty() {
             return Ok(0);
         }
@@ -117,7 +113,6 @@ where
         }
 
         let steadies = self.ping_readies(&readies).await?;
-        self.socket.clear_discover();
         #[cfg(feature = "std")] println!("STEADIES: {:?}", steadies);
         if steadies.is_empty() {
             return Ok(0);
@@ -128,7 +123,6 @@ where
         }
 
         let gos = self.ping_readies(&steadies).await?;
-        self.socket.clear_discover();
         #[cfg(feature = "std")] println!("GOs: {:?}", gos);
 
         let table = &mut self.table;
@@ -155,11 +149,12 @@ where
                 payload,
                 AddrPort::from_parts(VecAddr::local_dom_addr(), MANAGEMENT_PORT),
                 AddrPort::from_parts(VecAddr::from_local_addr(*ready), MANAGEMENT_PORT),
+                Some(20_000),
                 self.alloc,
             )
             .ok_or(())?;
 
-            self.socket.try_send_discover_authd(msg).map_err(drop)?;
+            self.socket.try_send_authd(msg).map_err(drop)?;
             let start = timer.get_ticks();
 
             'inner: loop {
@@ -208,11 +203,12 @@ where
             payload,
             AddrPort::from_parts(VecAddr::local_dom_addr(), MANAGEMENT_PORT),
             AddrPort::from_parts(VecAddr::local_broadcast_addr(), MANAGEMENT_PORT),
+            Some(100_000),
             self.alloc,
         )
         .ok_or(())?;
         #[cfg(feature = "std")] println!("BROADCAST!");
-        self.socket.try_send_discover_authd(msg).map_err(drop)?;
+        self.socket.try_send_authd(msg).map_err(drop)?;
 
         // Start the receive
         let start = timer.get_ticks();
@@ -292,11 +288,12 @@ where
                     msg.body,
                     msg.hdr.src,
                     msg.hdr.dst,
+                    None,
                     self.alloc,
                 )
                 .ok_or(())?;
 
-                self.socket.try_send_discover_authd(msg).map_err(drop)?;
+                self.socket.try_send_authd(msg).map_err(drop)?;
             }
         }
 

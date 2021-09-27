@@ -2,6 +2,7 @@
 #![allow(unused_imports, dead_code)]
 
 use core::{
+    marker::PhantomData,
     ops::{DerefMut, Deref},
     sync::atomic::{compiler_fence, Ordering::SeqCst},
 };
@@ -10,16 +11,23 @@ use anachro_485::{dispatch::{IoHandle, TimeStampBox}, icd::{SLAB_SIZE, TOTAL_SLA
 use byte_slab::{BSlab, ManagedArcSlab, SlabBox};
 use nrf52840_hal::{gpio::{Disconnected, Floating, Input, Level, Output, Pin, PushPull}, pac::{Interrupt, TIMER0, TIMER1, TIMER2, TIMER3, TIMER4, UARTE0, UARTE1}, ppi::{ConfigurablePpi, Ppi}, prelude::OutputPin, target_constants::EASY_DMA_SIZE, timer::Instance as TimerInstance, uarte::{Baudrate, Instance as UarteInstance, Parity, Pins}};
 use defmt::{info, warn, error};
+use groundhog::RollingTimer;
 
 type UarteBSlab = BSlab<TOTAL_SLABS, SLAB_SIZE>;
 type UarteBox = SlabBox<TOTAL_SLABS, SLAB_SIZE>;
 type UarteMas = ManagedArcSlab<'static, TOTAL_SLABS, SLAB_SIZE>;
 
-pub struct Uarte485<Timer, Channel, Uarte>
+struct ReceiveTime {
+    start: u32,
+    ticks: u32,
+}
+
+pub struct Uarte485<Timer, Channel, Uarte, Clock>
 where
     Timer: TimerInstance,
     Channel: Ppi + ConfigurablePpi,
     Uarte: Uarte485Instance,
+    Clock: RollingTimer<Tick = u32> + Default,
 {
     alloc: &'static UarteBSlab,
     timer: Timer,
@@ -28,8 +36,10 @@ where
     pins: InternalPin485,
     state: State485,
     io_hdl: IoHandle,
-    has_rx_credit: bool,
-    timeout: bool,
+    _clock: PhantomData<Clock>,
+    default_to: DefaultTo,
+
+    receive_for: Option<ReceiveTime>,
 }
 
 enum State485 {
@@ -73,11 +83,17 @@ enum Again {
     Yes,
 }
 
-impl<Timer, Channel, Uarte> Uarte485<Timer, Channel, Uarte>
+pub enum DefaultTo {
+    Sending,
+    Receiving,
+}
+
+impl<Timer, Channel, Uarte, Clock> Uarte485<Timer, Channel, Uarte, Clock>
 where
     Timer: TimerInstance,
     Channel: Ppi + ConfigurablePpi,
     Uarte: Uarte485Instance,
+    Clock: RollingTimer<Tick = u32> + Default,
 {
     pub fn new(
         alloc: &'static UarteBSlab,
@@ -86,6 +102,7 @@ where
         uarte: Uarte,
         pins: Pin485,
         ioh: IoHandle,
+        default_to: DefaultTo,
     ) -> Self {
         let pins = InternalPin485 {
             rs_de: pins.rs_de.into_push_pull_output(Level::Low),
@@ -145,23 +162,24 @@ where
             pins,
             state: State485::Idle,
             io_hdl: ioh,
-            has_rx_credit: false,
-            timeout: false,
+            default_to,
+            _clock: PhantomData,
+            receive_for: None,
         }
     }
 
     pub fn debug_events(&self) {
         if self.uarte.events_rxdrdy.read().events_rxdrdy().bit_is_set() {
-            defmt::info!("rxdrdy")
+            defmt::trace!("rxdrdy")
         }
         if self.uarte.events_endtx.read().events_endtx().bit_is_set() {
-            defmt::info!("endtx")
+            defmt::trace!("endtx")
         }
         if self.uarte.events_txstopped.read().events_txstopped().bit_is_set() {
-            defmt::info!("txstopped")
+            defmt::trace!("txstopped")
         }
         if self.uarte.events_endrx.read().events_endrx().bit_is_set() {
-            defmt::info!("endrx")
+            defmt::trace!("endrx")
         }
     }
 
@@ -178,8 +196,13 @@ where
         {
             self.timer.disable_interrupt();
             self.timer.timer_cancel();
-            self.timer.timer_reset_event();
             self.channel.disable();
+
+            // We need to idle for one microsecond to allow the
+            // transmitter to activate
+            self.timer.timer_start(1u32);
+            while self.timer.timer_running() { }
+            self.timer.timer_reset_event();
         }
 
         // UARTE
@@ -246,7 +269,6 @@ where
         {
             self.timer.disable_interrupt();
             self.timer.timer_cancel();
-            self.timer.timer_reset_event();
             self.channel.disable();
         }
 
@@ -379,10 +401,11 @@ where
             let len = self.uarte.rxd.amount.read().bits() as usize;
 
             if len != 0 {
+                defmt::info!("Got: {:?}", &sbox.deref()[..len]);
                 let result = self.io_hdl.push_incoming(TimeStampBox {
                     packet: sbox,
                     len,
-                    tick: 0, // TODO
+                    tick: Clock::default().get_ticks(),
                 });
 
                 defmt::assert!(result.is_ok());
@@ -391,8 +414,6 @@ where
             }
         }
     }
-
-
 
     pub fn uarte_interrupt(&mut self) {
         loop {
@@ -406,61 +427,45 @@ where
     }
 
     fn uarte_interrupt_inner(&mut self) -> Again {
-        // self.debug_events();
+        self.debug_events();
         let mut again = Again::No;
         let mut old_state = State485::Invalid;
         core::mem::swap(&mut old_state, &mut self.state);
 
         self.state = match old_state {
-            State485::Idle if self.has_rx_credit && self.io_hdl.auth().is_send_authd() => {
-                if let Some(msg) = self.io_hdl.pop_outgoing() {
-                    self.io_hdl.auth().clear_send_auth();
-                    self.has_rx_credit = false;
-                    self.prepare_send(&msg);
-                    State485::TxSending(msg)
-                } else {
-                    defmt::panic!("Send authorized but no packet?")
-                }
-            },
-            State485::Idle if self.io_hdl.auth().is_recv_authd() => {
-                if let Some(mut sbox) = self.alloc.alloc_box() {
-                    self.prepare_recv_initial(&mut sbox);
-                    State485::RxAwaitFirstByte(sbox)
-                } else {
-                    defmt::panic!("Recv requested but no alloc!");
-                }
-            },
             State485::Idle => {
-                warn!("Idle to idle transition? Why?");
-                State485::Idle
+                self.handle_idle()
             },
-            State485::RxAwaitFirstByte(sbox) if self.timeout => {
-                drop(sbox);
-                again = Again::Yes;
-                warn!("Initial RX timeout");
-                self.timer.disable_interrupt();
-                self.timer.timer_cancel();
-                State485::Idle
-            }
             State485::RxAwaitFirstByte(sbox) => {
-                match self.prepare_steady_recv() {
-                    Ok(_) => State485::RxReceiving(sbox),
-                    Err(_) => {
-                        State485::RxAwaitFirstByte(sbox)
+                if !self.timer.timer_running() {
+                    again = Again::Yes;
+                    State485::Idle
+                } else {
+                    match self.prepare_steady_recv() {
+                        Ok(_) => State485::RxReceiving(sbox),
+                        Err(_) => {
+                            State485::RxAwaitFirstByte(sbox)
+                        }
                     }
                 }
-
             },
             State485::RxReceiving(sbox) => {
-                self.complete_recv(sbox);
-                defmt::info!("Done receiving.");
-                self.has_rx_credit = true;
-                again = Again::Yes;
-                State485::Idle
+                let timer_done = !self.timer.timer_running();
+                let recv_done = self.uarte.events_endrx.read().events_endrx().bit_is_set();
+
+                if timer_done || recv_done {
+                    self.complete_recv(sbox);
+                    defmt::info!("Done receiving.");
+                    again = Again::Yes;
+                    State485::Idle
+                } else {
+                    State485::RxReceiving(sbox)
+                }
             },
             State485::TxSending(msg) => {
                 match self.complete_send(&msg) {
                     Ok(_) => {
+                        defmt::info!("{:?}", msg.deref());
                         again = Again::Yes;
                         defmt::info!("Done sending.");
                         State485::Idle
@@ -476,13 +481,70 @@ where
             },
         };
 
-        self.timeout = false;
-
         again
     }
 
+    fn handle_idle(&mut self) -> State485 {
+        // Okay, figure out where to go from here.
+        //
+        // * If a send is auth'd, or if we default to send, do that
+        //   * If there is a packet ready, start the send
+        //   * If there is not, just clear the auth (if there is one) and return to idle
+        // * If we default to receive, start a receive
+        let force_rx = if let Some(rx4) = self.receive_for.take() {
+            let elapsed = Clock::default().micros_since(rx4.start);
+            if elapsed >= rx4.ticks {
+                false
+            } else {
+                self.receive_for = Some(rx4);
+                true
+            }
+        } else {
+            false
+        };
+
+        if !force_rx && (matches!(self.default_to, DefaultTo::Sending) || self.io_hdl.auth().is_send_authd()) {
+            self.io_hdl.auth().clear_send_auth();
+
+            if let Some(msg) = self.io_hdl.pop_outgoing() {
+                // Record the start time
+                if let Some(rx4) = msg.receive_ticks_min {
+                    self.receive_for = Some(ReceiveTime {
+                        start: Clock::default().get_ticks(),
+                        ticks: rx4,
+                    });
+                }
+
+                self.prepare_send(&msg.packet);
+                State485::TxSending(msg.packet)
+            } else {
+                // Schedule a timer here for 1ms from now to maybe try again
+                self.uarte.intenclr.write(|w| unsafe { w.bits(0xFFFF_FFFF) });
+                self.setup_timer_interrupt_oneshot_us(1_000);
+                State485::Idle
+            }
+        } else {
+            if let Some(mut sbox) = self.alloc.alloc_box() {
+                self.prepare_recv_initial(&mut sbox);
+                State485::RxAwaitFirstByte(sbox)
+            } else {
+                defmt::warn!("Wanted to receive, but no box allocated!");
+                self.uarte.intenclr.write(|w| unsafe { w.bits(0xFFFF_FFFF) });
+                self.setup_timer_interrupt_oneshot_us(10_000);
+                State485::Idle
+            }
+        }
+    }
+
+    fn setup_timer_interrupt_oneshot_us(&mut self, ticks: u32) {
+        self.timer.timer_cancel();
+        self.channel.disable();
+        self.timer.enable_interrupt();
+        self.timer.timer_start(ticks);
+    }
+
     pub fn timer_interrupt(&mut self) {
-        self.timeout = true;
+        self.uarte_interrupt();
     }
 }
 

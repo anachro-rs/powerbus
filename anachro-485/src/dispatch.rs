@@ -28,6 +28,11 @@ pub struct TimeStampBox {
     pub tick: u32,
 }
 
+pub struct OutgoingSlab {
+    pub packet: MASlab,
+    pub receive_ticks_min: Option<u32>,
+}
+
 #[derive(Debug)]
 pub struct LocalHeader {
     pub src: AddrPort,
@@ -38,6 +43,12 @@ pub struct LocalHeader {
 pub struct LocalPacket {
     pub(crate) hdr: LocalHeader,
     pub(crate) payload: MASlab,
+    pub(crate) response_wait_ticks: Option<u32>,
+}
+
+pub enum AwakeIoHandler {
+    No,
+    Yes,
 }
 
 impl LocalPacket {
@@ -45,6 +56,7 @@ impl LocalPacket {
         msg: T,
         src: AddrPort,
         dst: AddrPort,
+        rx_ticks: Option<u32>,
         allo: &'static AllocSlab,
     ) -> Option<Self> {
         let mut buf = allo.alloc_box()?;
@@ -61,6 +73,7 @@ impl LocalPacket {
                 tick: 0,
             },
             payload: ManagedArcSlab::Owned(ssa),
+            response_wait_ticks: rx_ticks,
         };
 
         Some(lcp)
@@ -75,10 +88,10 @@ struct PortQueue {
 
 pub struct IoQueue {
     /// A queue of serialized messages sent to the IO handler
-    to_io: MpMcQueue<MASlab, IO_QUEUE_DEPTH>,
+    to_io: MpMcQueue<OutgoingSlab, IO_QUEUE_DEPTH>,
 
     /// A queue of serialized messages sent to the IO handler
-    to_io_hi_prio: MpMcQueue<MASlab, IO_QUEUE_DEPTH>,
+    to_io_hi_prio: MpMcQueue<OutgoingSlab, IO_QUEUE_DEPTH>,
 
     /// A queue of incoming, serialized messages sent to the
     /// dispatch handler
@@ -104,14 +117,6 @@ pub struct IoAuth {
     /// sub is the one that needs to wait to be authorized. How
     /// to handle this?
     io_send_auth: AtomicBool,
-
-    io_is_discovering: AtomicBool,
-
-    /// Is the IO handler authorized to receive a message?
-    ///
-    /// This is generally "sticky", and will stay enabled until
-    /// manually disabled.
-    io_recv_auth: AtomicBool,
 }
 
 impl IoHandle {
@@ -119,16 +124,11 @@ impl IoHandle {
         self.ioq.to_dispatch.enqueue(tsb)
     }
 
-    pub fn pop_outgoing(&mut self) -> Option<MASlab> {
+    pub fn pop_outgoing(&mut self) -> Option<OutgoingSlab> {
         match self.ioq.to_io_hi_prio.dequeue() {
             a @ Some(_) => a,
             None => {
-                if !self.ioq.io_auth.io_is_discovering.load(SeqCst) {
-                    self.ioq.to_io.dequeue()
-                } else {
-                    None
-                }
-
+                self.ioq.to_io.dequeue()
             }
         }
     }
@@ -140,18 +140,7 @@ impl IoHandle {
 
 impl IoAuth {
     pub fn enable_one_send(&self) {
-        if !self.io_is_discovering.load(SeqCst) {
-            self.io_send_auth.store(true, SeqCst);
-        }
-    }
-
-    pub fn set_discovering_auth(&self) {
-        self.io_is_discovering.store(true, SeqCst);
         self.io_send_auth.store(true, SeqCst);
-    }
-
-    pub fn clear_discovering(&self) {
-        self.io_is_discovering.store(false, SeqCst);
     }
 
     pub fn is_send_authd(&self) -> bool {
@@ -160,18 +149,6 @@ impl IoAuth {
 
     pub fn clear_send_auth(&self) {
         self.io_send_auth.store(false, SeqCst);
-    }
-
-    pub fn enable_recv(&self) {
-        self.io_recv_auth.store(true, SeqCst);
-    }
-
-    pub fn disable_recv(&self) {
-        self.io_recv_auth.store(false, SeqCst);
-    }
-
-    pub fn is_recv_authd(&self) -> bool {
-        self.io_recv_auth.load(SeqCst)
     }
 }
 
@@ -184,8 +161,6 @@ impl IoQueue {
             io_given: AtomicBool::new(false),
             io_auth: IoAuth {
                 io_send_auth: AtomicBool::new(false),
-                io_recv_auth: AtomicBool::new(true),
-                io_is_discovering: AtomicBool::new(false),
             },
         }
     }
@@ -213,7 +188,7 @@ pub struct Dispatch<const PORTS: usize> {
     ports: [PortQueue; PORTS],
     ioq: &'static IoQueue,
     own_addr: AtomicU8,
-    shame: MpMcQueue<MASlab, 1>,
+    shame: MpMcQueue<OutgoingSlab, 1>,
     alloc: &'static AllocSlab,
     // TODO: link to another Dispatch for forwarding
 }
@@ -385,6 +360,7 @@ impl<const PORTS: usize> Dispatch<PORTS> {
                     tick: time,
                 },
                 payload: lm.msg.reroot(&arc).ok_or(ProcessMessageError::ReRoot)?,
+                response_wait_ticks: None,
             })
             .map_err(|_| ProcessMessageError::TaskQueueFull)
     }
@@ -480,13 +456,16 @@ impl<const PORTS: usize> Dispatch<PORTS> {
             .sub_slice_arc(0, len)
             .map_err(|_| ProcessMessageError::Arc)?;
 
+        let mas = ManagedArcSlab::Owned(ssa);
+        let ogs = OutgoingSlab { packet: mas, receive_ticks_min: lp.response_wait_ticks };
+
         if port == crate::dom::MANAGEMENT_PORT {
-            self.ioq.to_io_hi_prio.enqueue(ManagedArcSlab::Owned(ssa)).ok();
+            self.ioq.to_io_hi_prio.enqueue(ogs).ok();
             Ok(())
         } else {
             self.ioq
                 .to_io
-                .enqueue(ManagedArcSlab::Owned(ssa))
+                .enqueue(ogs)
                 .map_err(|ssa| {
                     self.shame.enqueue(ssa).ok();
                     ProcessMessageError::IoQueueFull
@@ -516,21 +495,6 @@ impl<'a> DispatchSocket<'a> {
             },
             None => Err(pkt),
         }
-    }
-
-    pub fn try_send_discover_authd(&self, pkt: LocalPacket) -> Result<(), LocalPacket> {
-        match self.send_auth {
-            Some(auth) => {
-                self.try_send(pkt)?;
-                auth.set_discovering_auth();
-                Ok(())
-            },
-            None => Err(pkt),
-        }
-    }
-
-    pub fn clear_discover(&self) {
-        self.send_auth.map(|auth| auth.clear_discovering());
     }
 
     pub fn try_recv(&self) -> Option<LocalPacket> {
