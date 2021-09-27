@@ -3,7 +3,7 @@
 
 use groundhog::RollingTimer;
 use hardware_bringup::{self as _, PowerBusPins};
-use nrf52840_hal::{Timer, gpio::{Level, Output, Pin, PushPull}, pac::{Interrupt, TIMER2, UARTE0}, ppi::{Parts as PpiParts, Ppi3}, rng::Rng, prelude::OutputPin};
+use nrf52840_hal::{Timer, gpio::{Level, Output, Pin, PushPull}, pac::{Interrupt, SCB, TIMER2, UARTE0}, ppi::{Parts as PpiParts, Ppi3}, prelude::OutputPin, rng::Rng};
 // use groundhog::RollingTimer;
 use anachro_485::{dispatch::{IoQueue, Dispatch}, dom::MANAGEMENT_PORT};
 use anachro_485::icd::{SLAB_SIZE, TOTAL_SLABS};
@@ -38,16 +38,26 @@ const APP: () = {
         let board = cx.device;
 
         GlobalRollingTimer::init(board.TIMER0);
-        let _timer = GlobalRollingTimer::default();
+        let timer = GlobalRollingTimer::default();
         let _timer_2 = Timer::new(board.TIMER1);
 
         let pins = PowerBusPins::from_ports(board.P0, board.P1);
 
-        let led1 = pins.led_1.into_push_pull_output(Level::High).degrade();
-        let led2 = pins.led_2.into_push_pull_output(Level::High).degrade();
+        let mut led1 = pins.led_1.into_push_pull_output(Level::High).degrade();
+        let mut led2 = pins.led_2.into_push_pull_output(Level::High).degrade();
         let _ = pins.rs2_de.into_push_pull_output(Level::Low);      // Disabled
         let _ = pins.rs2_re_n.into_push_pull_output(Level::High);   // Disabled
         let ppi = PpiParts::new(board.PPI);
+
+        for _ in 0..3 {
+            let start = timer.get_ticks();
+            led1.set_low().ok();
+            led2.set_low().ok();
+            while timer.millis_since(start) <= 250 { }
+            led1.set_high().ok();
+            led2.set_high().ok();
+            while timer.millis_since(start) <= 1000 { }
+        }
 
         let mut rand = Rng::new(board.RNG);
 
@@ -95,8 +105,8 @@ const APP: () = {
 
         loop {
             if let Some(end) = endshot {
-                if timer.millis_since(end) >= 1000 {
-                    hardware_bringup::exit();
+                if timer.millis_since(end) >= 3000 {
+                    SCB::sys_reset();
                 }
                 DISPATCH.process_messages();
                 continue;

@@ -238,7 +238,7 @@ impl BusSubPayload {
         rng: &mut R,
         dom: BusDomPayload,
         hdr: &LocalHeader,
-    ) -> Option<(u8, u32, u32, HeaderPacket<BusSubPayload>)> {
+    ) -> Option<(u8, u32, u32, u32, HeaderPacket<BusSubPayload>)> {
         let src = hdr.src.addr.get_exact_local_addr()?;
         let dst = hdr.dst.addr.get_exact_local_addr()?;
 
@@ -264,6 +264,7 @@ impl BusSubPayload {
                 addr,
                 sub_random,
                 delay,
+                max_wait_us,
                 HeaderPacket {
                     hdr: LocalHeader {
                         src: AddrPort { addr: VecAddr::from_local_addr(addr), port: hdr.dst.port },

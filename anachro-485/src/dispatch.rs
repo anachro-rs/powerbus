@@ -117,6 +117,8 @@ pub struct IoAuth {
     /// sub is the one that needs to wait to be authorized. How
     /// to handle this?
     io_send_auth: AtomicBool,
+
+    io_flush_auth: AtomicBool,
 }
 
 impl IoHandle {
@@ -150,6 +152,10 @@ impl IoAuth {
     pub fn clear_send_auth(&self) {
         self.io_send_auth.store(false, SeqCst);
     }
+
+    pub fn is_flush_authd(&self) -> bool {
+        self.io_flush_auth.swap(false, SeqCst)
+    }
 }
 
 impl IoQueue {
@@ -161,6 +167,7 @@ impl IoQueue {
             io_given: AtomicBool::new(false),
             io_auth: IoAuth {
                 io_send_auth: AtomicBool::new(false),
+                io_flush_auth: AtomicBool::new(false),
             },
         }
     }
@@ -499,6 +506,12 @@ impl<'a> DispatchSocket<'a> {
 
     pub fn try_recv(&self) -> Option<LocalPacket> {
         self.to_task.dequeue()
+    }
+
+    pub fn auth_flush(&self) -> Result<(), ()> {
+        self.send_auth
+            .map(|auth| auth.io_flush_auth.store(true, SeqCst))
+            .ok_or(())
     }
 
     pub fn auth_send(&self) -> Result<(), ()> {

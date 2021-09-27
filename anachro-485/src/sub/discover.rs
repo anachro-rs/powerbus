@@ -4,12 +4,7 @@ use byte_slab::BSlab;
 use groundhog::RollingTimer;
 use rand::Rng;
 
-use crate::{
-    async_sleep_micros,
-    dispatch::{Dispatch, DispatchSocket, LocalPacket, INVALID_OWN_ADDR},
-    icd::{BusDomPayload, BusSubPayload, SLAB_SIZE, TOTAL_SLABS},
-    receive_timeout_micros,
-};
+use crate::{async_sleep_micros, dispatch::{Dispatch, DispatchSocket, LocalPacket, INVALID_OWN_ADDR}, icd::{BusDomPayload, BusSubPayload, SLAB_SIZE, TOTAL_SLABS}, receive_timeout_micros, timing::{SUB_BROADACKACK_WAIT_US, SUB_INITIAL_DISCO_WAIT_US, SUB_PING_WAIT_US}};
 
 pub struct Discovery<R, A>
 where
@@ -57,12 +52,16 @@ where
     pub async fn obtain_addr_inner(&mut self) -> Result<Option<u8>, ()> {
         defmt::info!("Sub start discovery...");
         let timer = R::default();
+
+        self.socket.auth_flush().ok();
+        async_sleep_micros::<R>(timer.get_ticks(), 2_000).await;
+
         self.dispatch.set_addr(INVALID_OWN_ADDR);
 
         let msg = match receive_timeout_micros::<R, BusDomPayload>(
             &mut self.socket,
             timer.get_ticks(),
-            1_000_000,
+            SUB_INITIAL_DISCO_WAIT_US,
         )
         .await
         {
@@ -70,10 +69,10 @@ where
             None => return Ok(None),
         };
 
-        let (addr, sub_random, delay, resp) = if let Some((addr, sub_random, delay, resp)) =
+        let (addr, sub_random, delay, max_delay, resp) = if let Some((addr, sub_random, delay, max_delay, resp)) =
             BusSubPayload::generate_discover_ack(&mut self.rand, msg.body, &msg.hdr)
         {
-            (addr, sub_random, delay, resp)
+            (addr, sub_random, delay, max_delay, resp)
         } else {
             return Ok(None);
         };
@@ -90,7 +89,9 @@ where
         self.dispatch.set_addr(addr);
         defmt::info!("Set addr to {=u8}", addr);
 
-        async_sleep_micros::<R>(timer.get_ticks(), delay).await;
+        let start_sleep = timer.get_ticks();
+
+        async_sleep_micros::<R>(start_sleep, delay).await;
 
         defmt::info!("Sending broadack");
         let msg =
@@ -98,32 +99,37 @@ where
                 .ok_or(())?;
         self.socket.try_send_authd(msg).map_err(drop)?;
 
-        async_sleep_micros::<R>(timer.get_ticks(), 100_000).await;
-
-        // return Ok(None);
+        defmt::assert!(max_delay >= delay);
+        let remaining_sleep = max_delay - delay;
 
         let start = timer.get_ticks();
         loop {
             let msg =
-                match receive_timeout_micros::<R, BusDomPayload>(&mut self.socket, start, 10_000_000)
+                match receive_timeout_micros::<R, BusDomPayload>(&mut self.socket, start, SUB_BROADACKACK_WAIT_US + remaining_sleep)
                     .await
                 {
                     Some(msg) => msg,
-                    None => return Ok(None),
+                    None => {
+                        defmt::warn!("Sub Timeout 1");
+                        return Ok(None)
+                    },
                 };
 
             match msg.body.validate_discover_ack_ack(&msg.hdr, sub_random) {
                 Ok(new_addr) if new_addr == addr => {
                     // println!("yey");
+                    defmt::info!("good ackack!");
                     break;
                 }
                 Ok(_) => {
                     // println!("wtf?");
-                    return Ok(None);
+                    // return Ok(None);
+                    defmt::warn!("OK message not for us");
                 }
                 Err(_) => {
                     // println!("ohno");
-                    return Ok(None);
+                    // return Ok(None);
+                    defmt::warn!("Bad Message");
                 }
             }
         }
@@ -131,18 +137,22 @@ where
         let mut success_ct: u8 = 0;
         defmt::info!("Sub got next...");
 
+
         loop {
-            let start = timer.get_ticks();
             defmt::info!("Sub got loop {=u8}...", success_ct);
+            let start = timer.get_ticks();
             let msg = match receive_timeout_micros::<R, BusDomPayload>(
                 &mut self.socket,
                 start,
-                10_000_000,
+                SUB_PING_WAIT_US,
             )
             .await
             {
                 Some(msg) => msg,
-                None => return Ok(None),
+                None => {
+                    defmt::warn!("Timeout 2");
+                    return Ok(None);
+                },
             };
 
             let j_start = timer.get_ticks();
@@ -164,11 +174,10 @@ where
                 success_ct += 1;
                 if success_ct >= 2 {
                     defmt::info!("Sub got yeyeyeye...");
-
-                    // TODO: This doesn't help :(
                     return Ok(Some(addr));
                 }
             } else {
+                defmt::error!("Bad generate_ping_ack!");
                 return Ok(None);
             }
         }

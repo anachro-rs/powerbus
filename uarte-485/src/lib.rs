@@ -249,6 +249,7 @@ where
         if !endtx {
             return Err(());
         }
+        while self.uarte.events_txstopped.read().events_txstopped().bit_is_set() { }
 
         let sent = self.uarte.txd.amount.read().amount().bits() as usize;
         defmt::assert_eq!(sent, msg.len());
@@ -260,7 +261,7 @@ where
 
             // We need to idle for one microsecond to allow the
             // transmitter to activate
-            self.timer.timer_start(10u32);
+            self.timer.timer_start(1u32);
             while self.timer.timer_running() { }
             self.timer.timer_reset_event();
         }
@@ -440,6 +441,12 @@ where
 
     fn uarte_interrupt_inner(&mut self) -> Again {
         self.debug_events();
+
+        if self.io_hdl.auth().is_flush_authd() {
+            self.io_hdl.auth().clear_send_auth();
+            while let Some(_) = self.io_hdl.pop_outgoing() { }
+        }
+
         let mut again = Again::No;
         let mut old_state = State485::Invalid;
         core::mem::swap(&mut old_state, &mut self.state);

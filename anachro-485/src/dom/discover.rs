@@ -1,9 +1,4 @@
-use crate::{
-    async_sleep_millis,
-    dispatch::{DispatchSocket, LocalPacket},
-    icd::{AddrPort, BusDomPayload, BusSubPayload, VecAddr, SLAB_SIZE, TOTAL_SLABS},
-    receive_timeout_micros,
-};
+use crate::{async_sleep_millis, dispatch::{DispatchSocket, LocalPacket}, icd::{AddrPort, BusDomPayload, BusSubPayload, VecAddr, SLAB_SIZE, TOTAL_SLABS}, receive_timeout_micros, timing::{DOM_BROADCAST_MAX_WAIT_US, DOM_BROADCAST_MIN_WAIT_US, DOM_PING_MAX_WAIT_US, DOM_PING_MIN_WAIT_US}};
 
 use core::{iter::FromIterator, marker::PhantomData, ops::Deref};
 
@@ -53,7 +48,7 @@ where
 
     pub async fn poll(&mut self) -> ! {
         let timer = R::default();
-        self.boost_mode = false;
+        // self.boost_mode = true;
 
         loop {
             // Boost until we haven't heard from a new device in the
@@ -67,9 +62,9 @@ where
 
 
             if !self.boost_mode {
-                async_sleep_millis::<R>(timer.get_ticks(), 5000u32).await;
+                async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
             } else {
-                async_sleep_millis::<R>(timer.get_ticks(), 10u32).await;
+                async_sleep_millis::<R>(timer.get_ticks(), 100u32).await;
             }
 
             let ret = self.poll_inner().await;
@@ -77,7 +72,7 @@ where
             match ret {
                 Ok(0) => {
                     if !self.boost_mode {
-                        async_sleep_millis::<R>(timer.get_ticks(), 2000u32).await;
+                        async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
                     }
                 }
                 Ok(_) => {
@@ -110,6 +105,8 @@ where
 
         if !self.boost_mode {
             async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
+        } else {
+            async_sleep_millis::<R>(timer.get_ticks(), 100u32).await;
         }
 
         let steadies = self.ping_readies(&readies).await?;
@@ -120,6 +117,8 @@ where
 
         if !self.boost_mode {
             async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
+        } else {
+            async_sleep_millis::<R>(timer.get_ticks(), 100u32).await;
         }
 
         let gos = self.ping_readies(&steadies).await?;
@@ -141,15 +140,15 @@ where
             let mut got = false;
             let payload = BusDomPayload::PingReq {
                 random: dom_random,
-                min_wait_us: 50_000,
-                max_wait_us: 100_000,
+                min_wait_us: DOM_PING_MIN_WAIT_US,
+                max_wait_us: DOM_PING_MAX_WAIT_US,
             };
 
             let msg = LocalPacket::from_parts_with_alloc(
                 payload,
                 AddrPort::from_parts(VecAddr::local_dom_addr(), MANAGEMENT_PORT),
                 AddrPort::from_parts(VecAddr::from_local_addr(*ready), MANAGEMENT_PORT),
-                Some(100_000),
+                Some(DOM_PING_MAX_WAIT_US),
                 self.alloc,
             )
             .ok_or(())?;
@@ -159,7 +158,7 @@ where
 
             'inner: loop {
                 let maybe_msg =
-                    receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, 200_000u32)
+                    receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, DOM_PING_MAX_WAIT_US)
                         .await;
 
                 let msg = match maybe_msg {
@@ -194,8 +193,8 @@ where
 
         let payload = BusDomPayload::DiscoverInitial {
             random: dom_random,
-            min_wait_us: 100_000,
-            max_wait_us: 250_000,
+            min_wait_us: DOM_BROADCAST_MIN_WAIT_US,
+            max_wait_us: DOM_BROADCAST_MAX_WAIT_US,
             offers: Vec::from_iter(avail_addrs.iter().cloned()),
         };
 
@@ -203,7 +202,7 @@ where
             payload,
             AddrPort::from_parts(VecAddr::local_dom_addr(), MANAGEMENT_PORT),
             AddrPort::from_parts(VecAddr::local_broadcast_addr(), MANAGEMENT_PORT),
-            Some(500_000),
+            Some(DOM_BROADCAST_MAX_WAIT_US),
             self.alloc,
         )
         .ok_or(())?;
@@ -217,7 +216,7 @@ where
         // Collect until timeout, or max messages received
         while !resps.is_full() {
             let maybe_msg =
-                receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, 500_000u32)
+                receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, DOM_BROADCAST_MAX_WAIT_US)
                     .await;
 
             if let Some(msg) = maybe_msg {

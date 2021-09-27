@@ -6,6 +6,7 @@ pub mod dispatch;
 pub mod dom;
 pub mod icd;
 pub mod sub;
+pub mod timing;
 
 use dispatch::{DispatchSocket, LocalHeader};
 use groundhog::{self, RollingTimer};
@@ -85,7 +86,10 @@ where
                         hdr: msg.hdr,
                         body: m,
                     })),
-                    Err(_) => Poll::Pending,
+                    Err(_) => {
+                        defmt::warn!("Bad deser!");
+                        Poll::Pending
+                    },
                 },
                 _ => Poll::Pending,
             }
