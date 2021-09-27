@@ -55,6 +55,7 @@ where
     }
 
     pub async fn obtain_addr_inner(&mut self) -> Result<Option<u8>, ()> {
+        defmt::info!("Sub start discovery...");
         let timer = R::default();
         self.dispatch.set_addr(INVALID_OWN_ADDR);
 
@@ -79,24 +80,32 @@ where
 
         // TODO: Move the "response percentage" to the dom, let it respond
         // to collisions/etc to decrease
-        if self.rand.gen_range(0..4) != 0 {
-            return Ok(None);
-        }
+        // if self.rand.gen_range(0..4) != 0 {
+        //     return Ok(None);
+        // }
+
+        defmt::info!("Sub got initial...");
 
         // Set our own addr to the provisionally chosen one
         self.dispatch.set_addr(addr);
+        defmt::info!("Set addr to {=u8}", addr);
 
         async_sleep_micros::<R>(timer.get_ticks(), delay).await;
 
+        defmt::info!("Sending broadack");
         let msg =
             LocalPacket::from_parts_with_alloc(resp.body, resp.hdr.src, resp.hdr.dst, None, self.alloc)
                 .ok_or(())?;
         self.socket.try_send_authd(msg).map_err(drop)?;
 
+        async_sleep_micros::<R>(timer.get_ticks(), 100_000).await;
+
+        // return Ok(None);
+
         let start = timer.get_ticks();
         loop {
             let msg =
-                match receive_timeout_micros::<R, BusDomPayload>(&mut self.socket, start, 250_000)
+                match receive_timeout_micros::<R, BusDomPayload>(&mut self.socket, start, 10_000_000)
                     .await
                 {
                     Some(msg) => msg,
@@ -119,14 +128,16 @@ where
             }
         }
 
-        let start = timer.get_ticks();
         let mut success_ct: u8 = 0;
+        defmt::info!("Sub got next...");
 
         loop {
+            let start = timer.get_ticks();
+            defmt::info!("Sub got loop {=u8}...", success_ct);
             let msg = match receive_timeout_micros::<R, BusDomPayload>(
                 &mut self.socket,
                 start,
-                5_000_000,
+                10_000_000,
             )
             .await
             {
@@ -152,6 +163,9 @@ where
 
                 success_ct += 1;
                 if success_ct >= 2 {
+                    defmt::info!("Sub got yeyeyeye...");
+
+                    // TODO: This doesn't help :(
                     return Ok(Some(addr));
                 }
             } else {

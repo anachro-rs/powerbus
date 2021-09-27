@@ -253,6 +253,18 @@ where
         let sent = self.uarte.txd.amount.read().amount().bits() as usize;
         defmt::assert_eq!(sent, msg.len());
 
+        {
+            self.timer.disable_interrupt();
+            self.timer.timer_cancel();
+            self.channel.disable();
+
+            // We need to idle for one microsecond to allow the
+            // transmitter to activate
+            self.timer.timer_start(10u32);
+            while self.timer.timer_running() { }
+            self.timer.timer_reset_event();
+        }
+
         self.uarte.intenclr.write(|w| w.endtx().set_bit());
         self.uarte.events_endtx.reset();
 
@@ -278,7 +290,7 @@ where
             self.timer.enable_interrupt();
 
             // TODO: Don't hardcode 1000us
-            self.timer.timer_start(1000u32);
+            self.timer.timer_start(1_000u32);
         }
 
         // Manage gpios
@@ -438,8 +450,13 @@ where
             },
             State485::RxAwaitFirstByte(sbox) => {
                 if !self.timer.timer_running() {
-                    again = Again::Yes;
-                    State485::Idle
+                    if !self.should_be_rxin() {
+                        again = Again::Yes;
+                        State485::Idle
+                    } else {
+                        self.setup_timer_interrupt_oneshot_us(1_000);
+                        State485::RxAwaitFirstByte(sbox)
+                    }
                 } else {
                     match self.prepare_steady_recv() {
                         Ok(_) => State485::RxReceiving(sbox),
@@ -484,7 +501,7 @@ where
         again
     }
 
-    fn handle_idle(&mut self) -> State485 {
+    fn should_be_rxin(&mut self) -> bool {
         // Okay, figure out where to go from here.
         //
         // * If a send is auth'd, or if we default to send, do that
@@ -503,7 +520,21 @@ where
             false
         };
 
-        if !force_rx && (matches!(self.default_to, DefaultTo::Sending) || self.io_hdl.auth().is_send_authd()) {
+        force_rx ||
+            (
+                !matches!(self.default_to, DefaultTo::Sending) &&
+                !self.io_hdl.auth().is_send_authd()
+            )
+    }
+
+    fn handle_idle(&mut self) -> State485 {
+        // Okay, figure out where to go from here.
+        //
+        // * If a send is auth'd, or if we default to send, do that
+        //   * If there is a packet ready, start the send
+        //   * If there is not, just clear the auth (if there is one) and return to idle
+        // * If we default to receive, start a receive
+        if !self.should_be_rxin() {
             self.io_hdl.auth().clear_send_auth();
 
             if let Some(msg) = self.io_hdl.pop_outgoing() {

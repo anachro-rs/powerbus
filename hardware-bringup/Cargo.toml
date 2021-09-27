@@ -26,6 +26,14 @@ choreographer = "0.0.4"
 cortex-m-rtic = "0.5.8"
 cassette = "0.2.3"
 
+[dependencies.rand_chacha]
+version = "0.3.1"
+default-features = false
+
+[dependencies.rand]
+version = "0.8.4"
+default-features = false
+
 [dependencies.uarte-485]
 path = "../uarte-485"
 

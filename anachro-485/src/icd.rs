@@ -215,7 +215,7 @@ impl BusSubPayload {
         {
             // Source address must match claim address
             if *own_id != addr {
-                // println!("BAD ADDR");
+                defmt::warn!("BAD ADDR: {:?} != {:?}", *own_id, addr);
                 return Err(());
             }
 
@@ -225,11 +225,11 @@ impl BusSubPayload {
             if *own_id_rand_checksum == result {
                 Ok((addr, *own_random))
             } else {
-                // println!("BAD CKSM");
+                defmt::warn!("BAD CKSM");
                 Err(())
             }
         } else {
-            // println!("WRONG MSG");
+            defmt::warn!("WRONG MSG");
             Err(())
         }
     }
@@ -258,13 +258,15 @@ impl BusSubPayload {
             let addr = *offers.get(addr_idx)?;
             let sub_random = rng.gen();
 
+            defmt::info!("Choosing {=u8}", addr);
+
             Some((
                 addr,
                 sub_random,
                 delay,
                 HeaderPacket {
                     hdr: LocalHeader {
-                        src: hdr.dst.clone(),
+                        src: AddrPort { addr: VecAddr::from_local_addr(addr), port: hdr.dst.port },
                         dst: hdr.src.clone(),
                         tick: 0,
                     },

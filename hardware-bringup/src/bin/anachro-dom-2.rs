@@ -14,6 +14,8 @@ use anachro_485::{dispatch::{IoQueue, Dispatch}, dom::MANAGEMENT_PORT};
 use anachro_485::icd::{SLAB_SIZE, TOTAL_SLABS};
 use byte_slab::BSlab;
 use groundhog_nrf52::GlobalRollingTimer;
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use uarte_485::{Pin485, Uarte485, DefaultTo};
 
 use anachro_485::dom::discover::Discovery;
@@ -27,7 +29,7 @@ const APP: () = {
     struct Resources {
         usart: Uarte485<TIMER2, Ppi3, UARTE0, GlobalRollingTimer>,
         dispatch: Dispatch<8>,
-        opt_rng: Option<Rng>,
+        opt_rng: Option<ChaCha8Rng>,
     }
 
     #[init]
@@ -50,7 +52,11 @@ const APP: () = {
         let _ = pins.rs1_re_n.into_push_pull_output(Level::High);   // Disabled
         let ppi = PpiParts::new(board.PPI);
 
-        let rand = Rng::new(board.RNG);
+        let mut rand = Rng::new(board.RNG);
+
+        let mut seed = [0u8; 32];
+        seed.iter_mut().for_each(|t| *t = rand.random_u8());
+        let rand = ChaCha8Rng::from_seed(seed);
 
         let uarrr = Uarte485::new(
             &BSLAB,

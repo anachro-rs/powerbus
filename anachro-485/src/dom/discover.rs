@@ -5,7 +5,7 @@ use crate::{
     receive_timeout_micros,
 };
 
-use core::{iter::FromIterator, marker::PhantomData};
+use core::{iter::FromIterator, marker::PhantomData, ops::Deref};
 
 use byte_slab::BSlab;
 use groundhog::RollingTimer;
@@ -53,7 +53,7 @@ where
 
     pub async fn poll(&mut self) -> ! {
         let timer = R::default();
-        self.boost_mode = true;
+        self.boost_mode = false;
 
         loop {
             // Boost until we haven't heard from a new device in the
@@ -67,7 +67,7 @@ where
 
 
             if !self.boost_mode {
-                async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
+                async_sleep_millis::<R>(timer.get_ticks(), 5000u32).await;
             } else {
                 async_sleep_millis::<R>(timer.get_ticks(), 10u32).await;
             }
@@ -81,10 +81,10 @@ where
                     }
                 }
                 Ok(_) => {
-                    #[cfg(feature = "std")] println!("Poll good!")
+                    defmt::info!("Poll good!")
                 }
                 Err(_) => {
-                    #[cfg(feature = "std")] println!("Poll bad!")
+                    defmt::info!("Poll bad!")
                 }
             }
         }
@@ -97,7 +97,7 @@ where
         if avail_addrs.is_empty() {
             return Err(());
         } else {
-            #[cfg(feature = "std")] println!("avail addrs: {}", avail_addrs.len());
+            defmt::info!("avail addrs: {}", avail_addrs.len());
         }
 
         // Broadcast initial
@@ -106,14 +106,14 @@ where
             return Ok(0);
         }
         self.last_disc = Some(timer.get_ticks());
-        #[cfg(feature = "std")] println!("READIES: {:?}", readies);
+        defmt::info!("READIES: {:?}", readies.deref());
 
         if !self.boost_mode {
             async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
         }
 
         let steadies = self.ping_readies(&readies).await?;
-        #[cfg(feature = "std")] println!("STEADIES: {:?}", steadies);
+        defmt::info!("STEADIES: {:?}", steadies.deref());
         if steadies.is_empty() {
             return Ok(0);
         }
@@ -123,7 +123,7 @@ where
         }
 
         let gos = self.ping_readies(&steadies).await?;
-        #[cfg(feature = "std")] println!("GOs: {:?}", gos);
+        defmt::info!("GOs: {:?}", gos.deref());
 
         let table = &mut self.table;
         gos.iter()
@@ -141,15 +141,15 @@ where
             let mut got = false;
             let payload = BusDomPayload::PingReq {
                 random: dom_random,
-                min_wait_us: 2_000,
-                max_wait_us: 20_000,
+                min_wait_us: 50_000,
+                max_wait_us: 100_000,
             };
 
             let msg = LocalPacket::from_parts_with_alloc(
                 payload,
                 AddrPort::from_parts(VecAddr::local_dom_addr(), MANAGEMENT_PORT),
                 AddrPort::from_parts(VecAddr::from_local_addr(*ready), MANAGEMENT_PORT),
-                Some(20_000),
+                Some(100_000),
                 self.alloc,
             )
             .ok_or(())?;
@@ -159,7 +159,7 @@ where
 
             'inner: loop {
                 let maybe_msg =
-                    receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, 40_000u32)
+                    receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, 200_000u32)
                         .await;
 
                 let msg = match maybe_msg {
@@ -177,12 +177,12 @@ where
             }
 
             if got {
-                #[cfg(feature = "std")] println!("yey!!!: {}", ready);
+                defmt::info!("yey!!!: {}", ready);
                 results.push(*ready).map_err(drop)?;
             }
         }
 
-        #[cfg(feature = "std")] println!("grepme: {:?}", results);
+        // defmt::info!("grepme: {:?}", results);
 
         Ok(results)
     }
@@ -194,8 +194,8 @@ where
 
         let payload = BusDomPayload::DiscoverInitial {
             random: dom_random,
-            min_wait_us: 10_000,
-            max_wait_us: 100_000,
+            min_wait_us: 100_000,
+            max_wait_us: 250_000,
             offers: Vec::from_iter(avail_addrs.iter().cloned()),
         };
 
@@ -203,11 +203,11 @@ where
             payload,
             AddrPort::from_parts(VecAddr::local_dom_addr(), MANAGEMENT_PORT),
             AddrPort::from_parts(VecAddr::local_broadcast_addr(), MANAGEMENT_PORT),
-            Some(100_000),
+            Some(500_000),
             self.alloc,
         )
         .ok_or(())?;
-        #[cfg(feature = "std")] println!("BROADCAST!");
+        defmt::info!("BROADCAST!");
         self.socket.try_send_authd(msg).map_err(drop)?;
 
         // Start the receive
@@ -217,7 +217,7 @@ where
         // Collect until timeout, or max messages received
         while !resps.is_full() {
             let maybe_msg =
-                receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, 200_000u32)
+                receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, 500_000u32)
                     .await;
 
             if let Some(msg) = maybe_msg {
@@ -227,7 +227,7 @@ where
             }
         }
 
-        // println!("DOM RESPS: {:?}", resps);
+        defmt::info!("DOM RESPS: {:?}", resps.deref().len());
 
         let mut offered = FnvIndexSet::<u8, 32>::new();
         let mut seen = FnvIndexSet::<u8, 32>::new();
@@ -266,20 +266,22 @@ where
                 .filter_map(Result::<_, u8>::ok),
         );
 
-        #[cfg(feature = "std")] println!("RPs: {:?}", response_pairs);
-        #[cfg(feature = "std")] println!("DUPES: {:?}", dupes);
+        defmt::info!("RPs: {:?}", response_pairs.len());
+        defmt::info!("DUPES: {:?}", dupes.len());
+
+        // return Err(());
 
         // Remove any duplicates that have been seen
         dupes.iter().for_each(|d| {
             let _ = response_pairs.remove(d);
         });
 
-        #[cfg(feature = "std")] println!("RPs: {:?}", response_pairs);
+        // defmt::info!("RPs: {:?}", response_pairs);
 
         let mut accepted = Vec::<u8, 32>::new();
         // ACK acceptable response pairs
         for (addr, sub_random) in response_pairs.iter() {
-            #[cfg(feature = "std")] println!("ACCEPTING: {:?}", addr);
+            defmt::info!("ACCEPTING: {:?}", addr);
             if let Ok(_) = accepted.push(*addr) {
                 let msg =
                     BusDomPayload::generate_discover_ack_ack(*addr, self.rand.gen(), *sub_random);
