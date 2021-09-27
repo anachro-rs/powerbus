@@ -3,7 +3,7 @@ pub use heapless::Vec;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-use crate::{dispatch::LocalHeader, dom::MANAGEMENT_PORT, HeaderPacket};
+use crate::{dispatch::LocalHeader, dom::DISCOVERY_PORT, HeaderPacket};
 
 pub const MAX_ADDR_SEGMENTS: usize = 8;
 
@@ -17,7 +17,7 @@ pub const LOCAL_BROADCAST_ADDR: u8 = 255;
 
 pub const LOCAL_ADDR_LEN: usize = 1;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct AddrPort {
     pub(crate) addr: VecAddr,
     pub(crate) port: u16,
@@ -83,7 +83,19 @@ impl VecAddr {
 pub const MAX_OFFERS: usize = 32;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum BusDomPayload {
+pub struct DomTokenGrantPayload {
+    pub random: u32,
+    pub max_time_us: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SubTokenReleasePayload {
+    pub random: u32,
+}
+
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum DomDiscoveryPayload {
     ResetConnection,
     DiscoverInitial {
         random: u32,
@@ -102,27 +114,22 @@ pub enum BusDomPayload {
         min_wait_us: u32,
         max_wait_us: u32,
     },
-    BusGrant {
-        tx_bytes_ready: u32,
-        rx_bytes_avail: u32,
-        max_grant_us: u32,
-    },
 }
 
-impl BusDomPayload {
+impl DomDiscoveryPayload {
     pub fn generate_discover_ack_ack(
         addr: u8,
         dom_random: u32,
         sub_random: u32,
-    ) -> HeaderPacket<BusDomPayload> {
+    ) -> HeaderPacket<DomDiscoveryPayload> {
         HeaderPacket {
             hdr: LocalHeader {
-                src: AddrPort::from_parts(VecAddr::local_dom_addr(), MANAGEMENT_PORT),
-                dst: AddrPort::from_parts(VecAddr::from_local_addr(addr), MANAGEMENT_PORT),
+                src: AddrPort::from_parts(VecAddr::local_dom_addr(), DISCOVERY_PORT),
+                dst: AddrPort::from_parts(VecAddr::from_local_addr(addr), DISCOVERY_PORT),
                 tick: 0,
             },
 
-            body: BusDomPayload::DiscoverAckAck {
+            body: DomDiscoveryPayload::DiscoverAckAck {
                 own_id: addr,
                 own_random: dom_random,
                 own_id_ownrand_checksum: checksum_addr_random(addr, dom_random, sub_random),
@@ -134,7 +141,7 @@ impl BusDomPayload {
         let src_addr = hdr.src.addr.get_exact_local_addr().ok_or(())?;
         let dst_addr = hdr.dst.addr.get_exact_local_addr().ok_or(())?;
 
-        if let BusDomPayload::DiscoverAckAck {
+        if let DomDiscoveryPayload::DiscoverAckAck {
             own_id,
             own_random,
             own_id_ownrand_checksum,
@@ -157,29 +164,24 @@ impl BusDomPayload {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum BusSubPayload {
+pub enum SubDiscoveryPayload {
     DiscoverAck {
         own_id: u8,
         own_id_rand_checksum: u32,
         own_random: u32,
     },
-    BusGrantAccept {
-        tx_bytes_ready: u32,
-        rx_bytes_avail: u32,
-    },
     PingAck {
         own_id_checksum: u32,
         own_random: u32,
     },
-    BusGrantRelease,
 }
 
-impl BusSubPayload {
+impl SubDiscoveryPayload {
     pub fn validate_ping_ack(&self, hdr: &LocalHeader, dom_random: u32) -> Result<(), ()> {
         // Messages must come from the local bus
         let addr = hdr.src.addr.get_exact_local_addr().ok_or(())?;
 
-        if let BusSubPayload::PingAck {
+        if let SubDiscoveryPayload::PingAck {
             own_id_checksum,
             own_random,
         } = self
@@ -207,7 +209,7 @@ impl BusSubPayload {
         // Messages must come from the local bus
         let addr = hdr.src.addr.get_exact_local_addr().ok_or(())?;
 
-        if let BusSubPayload::DiscoverAck {
+        if let SubDiscoveryPayload::DiscoverAck {
             own_id,
             own_id_rand_checksum,
             own_random,
@@ -236,9 +238,9 @@ impl BusSubPayload {
 
     pub fn generate_discover_ack<R: Rng>(
         rng: &mut R,
-        dom: BusDomPayload,
+        dom: DomDiscoveryPayload,
         hdr: &LocalHeader,
-    ) -> Option<(u8, u32, u32, u32, HeaderPacket<BusSubPayload>)> {
+    ) -> Option<(u8, u32, u32, u32, HeaderPacket<SubDiscoveryPayload>)> {
         let src = hdr.src.addr.get_exact_local_addr()?;
         let dst = hdr.dst.addr.get_exact_local_addr()?;
 
@@ -246,7 +248,7 @@ impl BusSubPayload {
             return None;
         }
 
-        if let BusDomPayload::DiscoverInitial {
+        if let DomDiscoveryPayload::DiscoverInitial {
             random,
             min_wait_us,
             max_wait_us,
@@ -271,7 +273,7 @@ impl BusSubPayload {
                         dst: hdr.src.clone(),
                         tick: 0,
                     },
-                    body: BusSubPayload::DiscoverAck {
+                    body: SubDiscoveryPayload::DiscoverAck {
                         own_id: addr,
                         own_random: sub_random,
                         own_id_rand_checksum: checksum_addr_random(addr, random, sub_random),
@@ -286,9 +288,9 @@ impl BusSubPayload {
     pub fn generate_ping_ack<R: Rng>(
         rng: &mut R,
         own_addr: u8,
-        dom: BusDomPayload,
+        dom: DomDiscoveryPayload,
         hdr: &LocalHeader,
-    ) -> Option<(u32, HeaderPacket<BusSubPayload>)> {
+    ) -> Option<(u32, HeaderPacket<SubDiscoveryPayload>)> {
         let src = hdr.src.addr.get_exact_local_addr()?;
         let dst = hdr.dst.addr.get_exact_local_addr()?;
 
@@ -296,7 +298,7 @@ impl BusSubPayload {
             return None;
         }
 
-        if let BusDomPayload::PingReq {
+        if let DomDiscoveryPayload::PingReq {
             random,
             min_wait_us,
             max_wait_us,
@@ -311,7 +313,7 @@ impl BusSubPayload {
                     src: hdr.dst.clone(),
                     tick: 0,
                 },
-                body: BusSubPayload::PingAck {
+                body: SubDiscoveryPayload::PingAck {
                     own_id_checksum: checksum_addr_random(own_addr, random, rand),
                     own_random: rand,
                 },

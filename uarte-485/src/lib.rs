@@ -557,6 +557,7 @@ where
                 State485::TxSending(msg.packet)
             } else {
                 // Schedule a timer here for 1ms from now to maybe try again
+                self.io_hdl.auth().mark_empty();
                 self.uarte.intenclr.write(|w| unsafe { w.bits(0xFFFF_FFFF) });
                 self.setup_timer_interrupt_oneshot_us(1_000);
                 State485::Idle

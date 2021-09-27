@@ -10,7 +10,7 @@ use nrf52840_hal::{
     Timer,
 };
 // use groundhog::RollingTimer;
-use anachro_485::{dispatch::{IoQueue, Dispatch}, dom::MANAGEMENT_PORT};
+use anachro_485::{dispatch::{IoQueue, Dispatch}, dom::{AddrTable32, DISCOVERY_PORT, TOKEN_PORT, token::Token}};
 use anachro_485::icd::{SLAB_SIZE, TOTAL_SLABS};
 use byte_slab::BSlab;
 use groundhog_nrf52::GlobalRollingTimer;
@@ -23,13 +23,14 @@ use cassette::{pin_mut, Cassette};
 
 static IOQ: IoQueue = IoQueue::new();
 static BSLAB: BSlab<TOTAL_SLABS, SLAB_SIZE> = BSlab::new();
+static ADDR_TABLE: AddrTable32 = AddrTable32::new();
 
 #[rtic::app(device = nrf52840_hal::pac, peripherals = true, monotonic = groundhog_nrf52::GlobalRollingTimer)]
 const APP: () = {
     struct Resources {
         usart: Uarte485<TIMER2, Ppi3, UARTE0, GlobalRollingTimer>,
         dispatch: Dispatch<8>,
-        opt_rng: Option<ChaCha8Rng>,
+        opt_rng: Option<(ChaCha8Rng, ChaCha8Rng)>,
     }
 
     #[init]
@@ -54,9 +55,12 @@ const APP: () = {
 
         let mut rand = Rng::new(board.RNG);
 
-        let mut seed = [0u8; 32];
-        seed.iter_mut().for_each(|t| *t = rand.random_u8());
-        let rand = ChaCha8Rng::from_seed(seed);
+        let mut seed_1 = [0u8; 32];
+        seed_1.iter_mut().for_each(|t| *t = rand.random_u8());
+        let rand_1 = ChaCha8Rng::from_seed(seed_1);
+        let mut seed_2 = [0u8; 32];
+        seed_2.iter_mut().for_each(|t| *t = rand.random_u8());
+        let rand_2 = ChaCha8Rng::from_seed(seed_2);
 
         let uarrr = Uarte485::new(
             &BSLAB,
@@ -77,65 +81,47 @@ const APP: () = {
         dispatch.set_addr(0);
 
 
-        init::LateResources { usart: uarrr, dispatch, opt_rng: Some(rand) }
+        init::LateResources { usart: uarrr, dispatch, opt_rng: Some((rand_1, rand_2)) }
     }
 
     #[idle(resources = [dispatch, opt_rng])]
     fn idle(ctx: idle::Context) -> ! {
         rtic::pend(Interrupt::UARTE0_UART0);
 
-        let rand = ctx.resources.opt_rng.take().unwrap();
+        let (rand_1, rand_2) = ctx.resources.opt_rng.take().unwrap();
 
-        let mgmt_socket = ctx
+        // DISCO
+        let disco_socket = ctx
             .resources
             .dispatch
-            .register_port(MANAGEMENT_PORT).unwrap();
+            .register_port(DISCOVERY_PORT).unwrap();
 
         let mut dom_disco: Discovery<GlobalRollingTimer, _> =
-            Discovery::new(mgmt_socket, rand, &BSLAB);
+            Discovery::new(disco_socket, rand_1, &BSLAB, &ADDR_TABLE);
         let dom_disco_future = dom_disco.poll();
         pin_mut!(dom_disco_future);
 
+        // GRANT
+        let grant_socket = ctx
+            .resources
+            .dispatch
+            .register_port(TOKEN_PORT).unwrap();
+
+        let mut dom_token: Token<GlobalRollingTimer, _> =
+            Token::new(grant_socket, rand_2, &BSLAB, &ADDR_TABLE);
+        let dom_token_future = dom_token.poll();
+        pin_mut!(dom_token_future);
+
         let mut cas_dom_disco = Cassette::new(dom_disco_future);
+        let mut cas_dom_token = Cassette::new(dom_token_future);
 
         loop {
             // Check the actual tasks
             cas_dom_disco.poll_on();
+            cas_dom_token.poll_on();
 
             // Process messages
             ctx.resources.dispatch.process_messages();
-
-            // if let Some(msg) = IOQ.to_dispatch.dequeue() {
-            //     let mut reply = false;
-            //     match core::str::from_utf8(&msg.packet[..msg.len]) {
-            //         Ok(strng) => {
-            //             defmt::info!("Got: {:?}", strng);
-            //             reply = true;
-            //         }
-            //         Err(_) => {
-            //             defmt::warn!("Bad decode: {=usize} => {:?}", msg.len, &msg.packet[..msg.len]);
-            //         }
-            //     }
-
-            //     if reply {
-            //         match BSLAB.alloc_box() {
-            //             Some(mut sbox) => {
-            //                 const REPLY: &[u8] = b"->Pow!";
-            //                 sbox[..REPLY.len()].copy_from_slice(REPLY);
-
-            //                 let arc = sbox.into_arc();
-            //                 let ssa = arc.sub_slice_arc(0, REPLY.len()).unwrap();
-            //                 let mas = ManagedArcSlab::Owned(ssa);
-
-            //                 IOQ.to_io.enqueue(mas).unwrap();
-            //                 IOQ.io_send_auth.store(true, SeqCst);
-            //             }
-            //             None => {
-            //                 defmt::warn!("Tried to reply, no alloc :(");
-            //             }
-            //         }
-            //     }
-            // }
         }
     }
 

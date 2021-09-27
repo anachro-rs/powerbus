@@ -5,7 +5,7 @@ use groundhog::RollingTimer;
 use hardware_bringup::{self as _, PowerBusPins};
 use nrf52840_hal::{Timer, gpio::{Level, Output, Pin, PushPull}, pac::{Interrupt, SCB, TIMER2, UARTE0}, ppi::{Parts as PpiParts, Ppi3}, prelude::OutputPin, rng::Rng};
 // use groundhog::RollingTimer;
-use anachro_485::{dispatch::{IoQueue, Dispatch}, dom::MANAGEMENT_PORT};
+use anachro_485::{dispatch::{IoQueue, Dispatch}, dom::{DISCOVERY_PORT, TOKEN_PORT}, sub::token::Token};
 use anachro_485::icd::{SLAB_SIZE, TOTAL_SLABS};
 use byte_slab::BSlab;
 use groundhog_nrf52::GlobalRollingTimer;
@@ -24,7 +24,7 @@ static DISPATCH: Dispatch<8> = Dispatch::new(&IOQ, &BSLAB);
 const APP: () = {
     struct Resources {
         usart: Uarte485<TIMER2, Ppi3, UARTE0, GlobalRollingTimer>,
-        opt_rng: Option<ChaCha8Rng>,
+        opt_rng: Option<(ChaCha8Rng, ChaCha8Rng)>,
         led1: Pin<Output<PushPull>>,
         led2: Pin<Output<PushPull>>,
     }
@@ -61,9 +61,13 @@ const APP: () = {
 
         let mut rand = Rng::new(board.RNG);
 
-        let mut seed = [0u8; 32];
-        seed.iter_mut().for_each(|t| *t = rand.random_u8());
-        let rand = ChaCha8Rng::from_seed(seed);
+        let mut seed_1 = [0u8; 32];
+        seed_1.iter_mut().for_each(|t| *t = rand.random_u8());
+        let rand_1 = ChaCha8Rng::from_seed(seed_1);
+
+        let mut seed_2 = [0u8; 32];
+        seed_2.iter_mut().for_each(|t| *t = rand.random_u8());
+        let rand_2 = ChaCha8Rng::from_seed(seed_2);
 
         let uarrr = Uarte485::new(
             &BSLAB,
@@ -80,24 +84,32 @@ const APP: () = {
             DefaultTo::Receiving,
         );
 
-        init::LateResources { usart: uarrr, opt_rng: Some(rand), led1, led2 }
+        init::LateResources { usart: uarrr, opt_rng: Some((rand_1, rand_2)), led1, led2 }
     }
 
     #[idle(resources = [opt_rng, led1, led2])]
     fn idle(ctx: idle::Context) -> ! {
         rtic::pend(Interrupt::UARTE0_UART0);
 
-        let rand = ctx.resources.opt_rng.take().unwrap();
+        let (rand_1, rand_2) = ctx.resources.opt_rng.take().unwrap();
 
-        let mgmt_socket = DISPATCH
-            .register_port(MANAGEMENT_PORT).unwrap();
+        let disco_socket = DISPATCH
+            .register_port(DISCOVERY_PORT).unwrap();
+        let token_socket = DISPATCH
+            .register_port(TOKEN_PORT).unwrap();
 
         let mut sub_disco: Discovery<GlobalRollingTimer, _> =
-            Discovery::new(rand, &DISPATCH, mgmt_socket, &BSLAB);
+            Discovery::new(rand_1, &DISPATCH, disco_socket, &BSLAB);
         let sub_disco_future = sub_disco.obtain_addr();
         pin_mut!(sub_disco_future);
 
+        let mut sub_token: Token<GlobalRollingTimer, _> =
+            Token::new(rand_2, &DISPATCH, token_socket, &BSLAB);
+        let sub_token_future = sub_token.poll();
+        pin_mut!(sub_token_future);
+
         let mut cas_sub_disco = Cassette::new(sub_disco_future);
+        let mut cas_sub_token = Cassette::new(sub_token_future);
 
         let mut addr_oneshot = false;
         let timer = GlobalRollingTimer::default();
@@ -105,9 +117,7 @@ const APP: () = {
 
         loop {
             if let Some(end) = endshot {
-                if timer.millis_since(end) >= 3000 {
-                    SCB::sys_reset();
-                }
+                cas_sub_token.poll_on();
                 DISPATCH.process_messages();
                 continue;
             }
@@ -126,6 +136,8 @@ const APP: () = {
                 let now = timer.get_ticks();
                 endshot = Some(now);
             }
+
+            cas_sub_token.poll_on();
 
             if !addr_oneshot {
                 if let Some(addr) = DISPATCH.get_addr() {

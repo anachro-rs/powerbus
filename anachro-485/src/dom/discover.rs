@@ -1,4 +1,4 @@
-use crate::{async_sleep_millis, dispatch::{DispatchSocket, LocalPacket}, icd::{AddrPort, BusDomPayload, BusSubPayload, VecAddr, SLAB_SIZE, TOTAL_SLABS}, receive_timeout_micros, timing::{DOM_BROADCAST_MAX_WAIT_US, DOM_BROADCAST_MIN_WAIT_US, DOM_PING_MAX_WAIT_US, DOM_PING_MIN_WAIT_US}};
+use crate::{async_sleep_millis, dispatch::{DispatchSocket, LocalPacket}, icd::{AddrPort, DomDiscoveryPayload, SubDiscoveryPayload, VecAddr, SLAB_SIZE, TOTAL_SLABS}, receive_timeout_micros, timing::{DOM_BROADCAST_MAX_WAIT_US, DOM_BROADCAST_MIN_WAIT_US, DOM_PING_MAX_WAIT_US, DOM_PING_MIN_WAIT_US}};
 
 use core::{iter::FromIterator, marker::PhantomData, ops::Deref};
 
@@ -9,7 +9,7 @@ use rand::Rng;
 
 use crate::dom::AddrTable32;
 
-use super::MANAGEMENT_PORT;
+use super::DISCOVERY_PORT;
 
 pub struct Discovery<R, A>
 where
@@ -18,7 +18,7 @@ where
 {
     _timer: PhantomData<R>,
     socket: DispatchSocket<'static>,
-    table: AddrTable32,
+    table: &'static AddrTable32,
     rand: A,
     boost_mode: bool,
     alloc: &'static BSlab<TOTAL_SLABS, SLAB_SIZE>,
@@ -34,12 +34,13 @@ where
         socket: DispatchSocket<'static>,
         rand: A,
         alloc: &'static BSlab<TOTAL_SLABS, SLAB_SIZE>,
+        table: &'static AddrTable32
     ) -> Self {
         Self {
             _timer: PhantomData,
             socket,
             rand,
-            table: AddrTable32::new(),
+            table,
             boost_mode: true,
             alloc,
             last_disc: None,
@@ -48,7 +49,7 @@ where
 
     pub async fn poll(&mut self) -> ! {
         let timer = R::default();
-        // self.boost_mode = true;
+        self.boost_mode = false;
 
         loop {
             // Boost until we haven't heard from a new device in the
@@ -86,7 +87,7 @@ where
     }
 
     pub async fn poll_inner(&mut self) -> Result<usize, ()> {
-        let avail_addrs = { self.table.reserve_all_addrs() };
+        let avail_addrs = self.table.get_available_addrs();
         let timer = R::default();
 
         if avail_addrs.is_empty() {
@@ -138,7 +139,7 @@ where
 
         'outer: for ready in readies {
             let mut got = false;
-            let payload = BusDomPayload::PingReq {
+            let payload = DomDiscoveryPayload::PingReq {
                 random: dom_random,
                 min_wait_us: DOM_PING_MIN_WAIT_US,
                 max_wait_us: DOM_PING_MAX_WAIT_US,
@@ -146,8 +147,8 @@ where
 
             let msg = LocalPacket::from_parts_with_alloc(
                 payload,
-                AddrPort::from_parts(VecAddr::local_dom_addr(), MANAGEMENT_PORT),
-                AddrPort::from_parts(VecAddr::from_local_addr(*ready), MANAGEMENT_PORT),
+                AddrPort::from_parts(VecAddr::local_dom_addr(), DISCOVERY_PORT),
+                AddrPort::from_parts(VecAddr::from_local_addr(*ready), DISCOVERY_PORT),
                 Some(DOM_PING_MAX_WAIT_US),
                 self.alloc,
             )
@@ -158,7 +159,7 @@ where
 
             'inner: loop {
                 let maybe_msg =
-                    receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, DOM_PING_MAX_WAIT_US)
+                    receive_timeout_micros::<R, SubDiscoveryPayload>(&mut self.socket, start, DOM_PING_MAX_WAIT_US)
                         .await;
 
                 let msg = match maybe_msg {
@@ -191,7 +192,7 @@ where
 
         let dom_random = self.rand.gen();
 
-        let payload = BusDomPayload::DiscoverInitial {
+        let payload = DomDiscoveryPayload::DiscoverInitial {
             random: dom_random,
             min_wait_us: DOM_BROADCAST_MIN_WAIT_US,
             max_wait_us: DOM_BROADCAST_MAX_WAIT_US,
@@ -200,8 +201,8 @@ where
 
         let msg = LocalPacket::from_parts_with_alloc(
             payload,
-            AddrPort::from_parts(VecAddr::local_dom_addr(), MANAGEMENT_PORT),
-            AddrPort::from_parts(VecAddr::local_broadcast_addr(), MANAGEMENT_PORT),
+            AddrPort::from_parts(VecAddr::local_dom_addr(), DISCOVERY_PORT),
+            AddrPort::from_parts(VecAddr::local_broadcast_addr(), DISCOVERY_PORT),
             Some(DOM_BROADCAST_MAX_WAIT_US),
             self.alloc,
         )
@@ -216,7 +217,7 @@ where
         // Collect until timeout, or max messages received
         while !resps.is_full() {
             let maybe_msg =
-                receive_timeout_micros::<R, BusSubPayload>(&mut self.socket, start, DOM_BROADCAST_MAX_WAIT_US)
+                receive_timeout_micros::<R, SubDiscoveryPayload>(&mut self.socket, start, DOM_BROADCAST_MAX_WAIT_US)
                     .await;
 
             if let Some(msg) = maybe_msg {
@@ -283,7 +284,7 @@ where
             defmt::info!("ACCEPTING: {:?}", addr);
             if let Ok(_) = accepted.push(*addr) {
                 let msg =
-                    BusDomPayload::generate_discover_ack_ack(*addr, self.rand.gen(), *sub_random);
+                    DomDiscoveryPayload::generate_discover_ack_ack(*addr, self.rand.gen(), *sub_random);
 
                 let msg = LocalPacket::from_parts_with_alloc(
                     msg.body,

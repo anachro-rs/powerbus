@@ -119,6 +119,8 @@ pub struct IoAuth {
     io_send_auth: AtomicBool,
 
     io_flush_auth: AtomicBool,
+
+    io_empty_auth: AtomicBool,
 }
 
 impl IoHandle {
@@ -156,6 +158,10 @@ impl IoAuth {
     pub fn is_flush_authd(&self) -> bool {
         self.io_flush_auth.swap(false, SeqCst)
     }
+
+    pub fn mark_empty(&self) {
+        self.io_empty_auth.store(true, SeqCst);
+    }
 }
 
 impl IoQueue {
@@ -168,6 +174,7 @@ impl IoQueue {
             io_auth: IoAuth {
                 io_send_auth: AtomicBool::new(false),
                 io_flush_auth: AtomicBool::new(false),
+                io_empty_auth: AtomicBool::new(false),
             },
         }
     }
@@ -275,7 +282,8 @@ impl<const PORTS: usize> Dispatch<PORTS> {
         //
         // Generally limited to management messages and discovery messsages
         let auth = match port {
-            crate::dom::MANAGEMENT_PORT => Some(&self.ioq.io_auth),
+            crate::dom::DISCOVERY_PORT => Some(&self.ioq.io_auth),
+            crate::dom::TOKEN_PORT => Some(&self.ioq.io_auth),
             _ => None
         };
 
@@ -326,8 +334,19 @@ impl<const PORTS: usize> Dispatch<PORTS> {
             // Accept messages to us
             Some(addr) if addr == own_addr => Ok(()),
 
+            // Don't alert on dom messages (if they aren't for us)
+            Some(LOCAL_DOM_ADDR) => Err(ProcessMessageError::DestAddr),
+
             // Reject all others
-            _ => Err(ProcessMessageError::DestAddr),
+            Some(addr) => {
+                defmt::warn!("not for us! {=u8}", addr);
+                Err(ProcessMessageError::DestAddr)
+            },
+
+            None => {
+                defmt::warn!("not for anyone!");
+                Err(ProcessMessageError::DestAddr)
+            },
         }?;
 
         let good = lm
@@ -376,6 +395,7 @@ impl<const PORTS: usize> Dispatch<PORTS> {
         while let Some(msg) = self.ioq.to_dispatch.dequeue() {
             if let Err(_e) = self.process_one_incoming(msg) {
                 // TODO: print errors, but dont return early.
+                defmt::error!("message yeeted");
             }
         }
 
@@ -466,7 +486,7 @@ impl<const PORTS: usize> Dispatch<PORTS> {
         let mas = ManagedArcSlab::Owned(ssa);
         let ogs = OutgoingSlab { packet: mas, receive_ticks_min: lp.response_wait_ticks };
 
-        if port == crate::dom::MANAGEMENT_PORT {
+        if (port == crate::dom::DISCOVERY_PORT) || (port == crate::dom::TOKEN_PORT) {
             self.ioq.to_io_hi_prio.enqueue(ogs).ok();
             Ok(())
         } else {
@@ -517,6 +537,18 @@ impl<'a> DispatchSocket<'a> {
     pub fn auth_send(&self) -> Result<(), ()> {
         self.send_auth
             .map(|auth| auth.enable_one_send())
+            .ok_or(())
+    }
+
+    pub fn clear_empty(&self) -> Result<(), ()> {
+        self.send_auth
+            .map(|auth| auth.io_empty_auth.store(false, SeqCst))
+            .ok_or(())
+    }
+
+    pub fn is_empty(&self) -> Result<bool, ()> {
+        self.send_auth
+            .map(|auth| auth.io_empty_auth.swap(false, SeqCst))
             .ok_or(())
     }
 

@@ -4,7 +4,7 @@ use byte_slab::BSlab;
 use groundhog::RollingTimer;
 use rand::Rng;
 
-use crate::{async_sleep_micros, dispatch::{Dispatch, DispatchSocket, LocalPacket, INVALID_OWN_ADDR}, icd::{BusDomPayload, BusSubPayload, SLAB_SIZE, TOTAL_SLABS}, receive_timeout_micros, timing::{SUB_BROADACKACK_WAIT_US, SUB_INITIAL_DISCO_WAIT_US, SUB_PING_WAIT_US}};
+use crate::{async_sleep_micros, dispatch::{Dispatch, DispatchSocket, LocalPacket, INVALID_OWN_ADDR}, icd::{DomDiscoveryPayload, SubDiscoveryPayload, SLAB_SIZE, TOTAL_SLABS}, receive_timeout_micros, timing::{SUB_BROADACKACK_WAIT_US, SUB_INITIAL_DISCO_WAIT_US, SUB_PING_WAIT_US}};
 
 pub struct Discovery<R, A>
 where
@@ -58,7 +58,7 @@ where
 
         self.dispatch.set_addr(INVALID_OWN_ADDR);
 
-        let msg = match receive_timeout_micros::<R, BusDomPayload>(
+        let msg = match receive_timeout_micros::<R, DomDiscoveryPayload>(
             &mut self.socket,
             timer.get_ticks(),
             SUB_INITIAL_DISCO_WAIT_US,
@@ -70,7 +70,7 @@ where
         };
 
         let (addr, sub_random, delay, max_delay, resp) = if let Some((addr, sub_random, delay, max_delay, resp)) =
-            BusSubPayload::generate_discover_ack(&mut self.rand, msg.body, &msg.hdr)
+            SubDiscoveryPayload::generate_discover_ack(&mut self.rand, msg.body, &msg.hdr)
         {
             (addr, sub_random, delay, max_delay, resp)
         } else {
@@ -105,7 +105,7 @@ where
         let start = timer.get_ticks();
         loop {
             let msg =
-                match receive_timeout_micros::<R, BusDomPayload>(&mut self.socket, start, SUB_BROADACKACK_WAIT_US + remaining_sleep)
+                match receive_timeout_micros::<R, DomDiscoveryPayload>(&mut self.socket, start, SUB_BROADACKACK_WAIT_US + remaining_sleep)
                     .await
                 {
                     Some(msg) => msg,
@@ -141,7 +141,7 @@ where
         loop {
             defmt::info!("Sub got loop {=u8}...", success_ct);
             let start = timer.get_ticks();
-            let msg = match receive_timeout_micros::<R, BusDomPayload>(
+            let msg = match receive_timeout_micros::<R, DomDiscoveryPayload>(
                 &mut self.socket,
                 start,
                 SUB_PING_WAIT_US,
@@ -157,7 +157,7 @@ where
 
             let j_start = timer.get_ticks();
             if let Some((jitter, resp)) =
-                BusSubPayload::generate_ping_ack(&mut self.rand, addr, msg.body, &msg.hdr)
+                SubDiscoveryPayload::generate_ping_ack(&mut self.rand, addr, msg.body, &msg.hdr)
             {
                 async_sleep_micros::<R>(j_start, jitter).await;
 
