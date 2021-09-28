@@ -93,7 +93,6 @@ pub struct SubTokenReleasePayload {
     pub random: u32,
 }
 
-
 #[derive(Debug, Serialize, Deserialize)]
 pub enum DomDiscoveryPayload {
     ResetConnection,
@@ -269,7 +268,10 @@ impl SubDiscoveryPayload {
                 max_wait_us,
                 HeaderPacket {
                     hdr: LocalHeader {
-                        src: AddrPort { addr: VecAddr::from_local_addr(addr), port: hdr.dst.port },
+                        src: AddrPort {
+                            addr: VecAddr::from_local_addr(addr),
+                            port: hdr.dst.port,
+                        },
                         dst: hdr.src.clone(),
                         tick: 0,
                     },

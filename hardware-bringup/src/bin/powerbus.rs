@@ -3,12 +3,12 @@
 
 use {
     embedded_hal::blocking::delay::DelayMs,
+    hardware_bringup as _, // global logger + panicking-behavior + memory layout
     nrf52840_hal::{
         self as hal,
         gpio::{p0::Parts as P0Parts, p1::Parts as P1Parts, Level},
         Rng, Timer,
     },
-    hardware_bringup as _, // global logger + panicking-behavior + memory layout
     nrf_smartled::pwm::Pwm,
     smart_leds::{colors, gamma, RGB8},
     smart_leds_trait::SmartLedsWrite,
@@ -95,11 +95,7 @@ fn main() -> ! {
 
         ct = ct.wrapping_add(1);
 
-        leds.write(
-            gamma(
-                pixels.iter().cloned()
-            )
-        ).ok();
+        leds.write(gamma(pixels.iter().cloned())).ok();
         timer.delay_ms(10u32);
     }
 }

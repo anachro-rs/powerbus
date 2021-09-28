@@ -2,7 +2,13 @@
 #![no_std]
 
 use hardware_bringup::{self as _, PowerBusPins};
-use nrf52840_hal::{Timer, gpio::Level, pac::Peripherals, prelude::OutputPin, uarte::{Baudrate, Parity, Pins as UartePins, Uarte}};
+use nrf52840_hal::{
+    gpio::Level,
+    pac::Peripherals,
+    prelude::OutputPin,
+    uarte::{Baudrate, Parity, Pins as UartePins, Uarte},
+    Timer,
+};
 // use groundhog::RollingTimer;
 use groundhog_nrf52::GlobalRollingTimer;
 
@@ -36,35 +42,32 @@ fn main() -> ! {
 
     let mut buf = [0u8; 255];
 
-    let _ = pins.rs1_de.into_push_pull_output(Level::Low);      // Disabled
-    let _ = pins.rs1_re_n.into_push_pull_output(Level::High);   // Disabled
-    let _ = pins.rs2_de.into_push_pull_output(Level::Low);      // Disabled
-    let _ = pins.rs2_re_n.into_push_pull_output(Level::Low);    // Enabled
+    let _ = pins.rs1_de.into_push_pull_output(Level::Low); // Disabled
+    let _ = pins.rs1_re_n.into_push_pull_output(Level::High); // Disabled
+    let _ = pins.rs2_de.into_push_pull_output(Level::Low); // Disabled
+    let _ = pins.rs2_re_n.into_push_pull_output(Level::Low); // Enabled
 
     loop {
         led1.set_low().ok();
         led2.set_high().ok();
 
-
         match serial.read_timeout(&mut buf, &mut timer_2, 100_000) {
             Ok(_) => {
                 let strng = defmt::unwrap!(core::str::from_utf8(&buf[..5]).map_err(drop));
                 defmt::info!("Got: {:?}", strng);
-            },
-            Err(nrf52840_hal::uarte::Error::Timeout(0)) => { }
-            Err(nrf52840_hal::uarte::Error::Timeout(n)) => {
-                match core::str::from_utf8(&buf[..n]) {
-                    Ok(strng) => {
-                        defmt::info!("Got: {:?}", strng);
-                    }
-                    Err(_) => {
-                        defmt::warn!("Bad decode: {=usize} => {:?}", n, &buf[..n]);
-                    }
-                }
             }
+            Err(nrf52840_hal::uarte::Error::Timeout(0)) => {}
+            Err(nrf52840_hal::uarte::Error::Timeout(n)) => match core::str::from_utf8(&buf[..n]) {
+                Ok(strng) => {
+                    defmt::info!("Got: {:?}", strng);
+                }
+                Err(_) => {
+                    defmt::warn!("Bad decode: {=usize} => {:?}", n, &buf[..n]);
+                }
+            },
             Err(_) => {
                 defmt::warn!("Timeout :(");
-            },
+            }
         }
 
         led1.set_high().ok();
@@ -74,21 +77,19 @@ fn main() -> ! {
             Ok(_) => {
                 let strng = defmt::unwrap!(core::str::from_utf8(&buf[..5]).map_err(drop));
                 defmt::info!("Got: {:?}", strng);
-            },
-            Err(nrf52840_hal::uarte::Error::Timeout(0)) => { }
-            Err(nrf52840_hal::uarte::Error::Timeout(n)) => {
-                match core::str::from_utf8(&buf[..n]) {
-                    Ok(strng) => {
-                        defmt::info!("Got: {:?}", strng);
-                    }
-                    Err(_) => {
-                        defmt::warn!("Bad decode: {=usize}", n);
-                    }
-                }
             }
+            Err(nrf52840_hal::uarte::Error::Timeout(0)) => {}
+            Err(nrf52840_hal::uarte::Error::Timeout(n)) => match core::str::from_utf8(&buf[..n]) {
+                Ok(strng) => {
+                    defmt::info!("Got: {:?}", strng);
+                }
+                Err(_) => {
+                    defmt::warn!("Bad decode: {=usize}", n);
+                }
+            },
             Err(_) => {
                 defmt::warn!("Timeout :(");
-            },
+            }
         }
     }
 }

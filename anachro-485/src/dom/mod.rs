@@ -1,5 +1,5 @@
+use core::sync::atomic::{AtomicU32, Ordering::SeqCst};
 use heapless::Vec;
-use core::sync::atomic::{Ordering::SeqCst, AtomicU32};
 
 pub mod discover;
 pub mod token;
@@ -85,8 +85,8 @@ mod todo {
     // cassette'd futures, and polling them in a sort of round
     // robin'd
 
-    use cassette::Cassette;
     use crate::dispatch::{Dispatch, DispatchSocket};
+    use cassette::Cassette;
 
     pub struct DomHandle<T>
     where

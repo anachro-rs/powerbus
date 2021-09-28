@@ -4,7 +4,17 @@ use byte_slab::BSlab;
 use groundhog::RollingTimer;
 use rand::Rng;
 
-use crate::{async_sleep_micros, async_sleep_millis, dispatch::{Dispatch, DispatchSocket, LocalPacket, INVALID_OWN_ADDR}, dom::TOKEN_PORT, icd::{AddrPort, DomDiscoveryPayload, DomTokenGrantPayload, SLAB_SIZE, SubDiscoveryPayload, SubTokenReleasePayload, TOTAL_SLABS, VecAddr}, receive_timeout_micros, timing::{SUB_BROADACKACK_WAIT_US, SUB_INITIAL_DISCO_WAIT_US, SUB_PING_WAIT_US}};
+use crate::{
+    async_sleep_micros, async_sleep_millis,
+    dispatch::{Dispatch, DispatchSocket, LocalPacket, INVALID_OWN_ADDR},
+    dom::TOKEN_PORT,
+    icd::{
+        AddrPort, DomDiscoveryPayload, DomTokenGrantPayload, SubDiscoveryPayload,
+        SubTokenReleasePayload, VecAddr, SLAB_SIZE, TOTAL_SLABS,
+    },
+    receive_timeout_micros,
+    timing::{SUB_BROADACKACK_WAIT_US, SUB_INITIAL_DISCO_WAIT_US, SUB_PING_WAIT_US},
+};
 
 pub struct Token<R, A>
 where
@@ -43,7 +53,7 @@ where
     pub async fn poll(&mut self) -> ! {
         loop {
             match self.poll_inner().await {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(_) => {
                     defmt::warn!("Bad sub token poll");
                 }
@@ -61,16 +71,18 @@ where
             Some(addr) => addr,
         };
 
-
-        let maybe_msg =
-            receive_timeout_micros::<R, DomTokenGrantPayload>(&mut self.socket, timer.get_ticks(), 1_000_000)
-                .await;
+        let maybe_msg = receive_timeout_micros::<R, DomTokenGrantPayload>(
+            &mut self.socket,
+            timer.get_ticks(),
+            1_000_000,
+        )
+        .await;
 
         let msg = match maybe_msg {
             Some(msg) => {
                 self.bad_ticks = 0;
                 msg
-            },
+            }
             None => {
                 defmt::warn!("No grant for a full second!");
                 self.bad_ticks += 1;
@@ -79,8 +91,8 @@ where
                     defmt::panic!("Too quiet!");
                 }
 
-                return Err(())
-            },
+                return Err(());
+            }
         };
 
         let start = timer.get_ticks();
@@ -116,5 +128,4 @@ where
 
         // Got a token, stick a message in the queue
     }
-
 }

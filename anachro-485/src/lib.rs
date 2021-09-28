@@ -89,7 +89,7 @@ where
                     Err(_) => {
                         defmt::warn!("Bad deser!");
                         Poll::Pending
-                    },
+                    }
                 },
                 _ => Poll::Pending,
             }

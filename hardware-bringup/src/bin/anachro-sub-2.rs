@@ -3,15 +3,26 @@
 
 use groundhog::RollingTimer;
 use hardware_bringup::{self as _, PowerBusPins};
-use nrf52840_hal::{Timer, gpio::{Level, Output, Pin, PushPull}, pac::{Interrupt, SCB, TIMER2, UARTE0}, ppi::{Parts as PpiParts, Ppi3}, prelude::OutputPin, rng::Rng};
+use nrf52840_hal::{
+    gpio::{Level, Output, Pin, PushPull},
+    pac::{Interrupt, SCB, TIMER2, UARTE0},
+    ppi::{Parts as PpiParts, Ppi3},
+    prelude::OutputPin,
+    rng::Rng,
+    Timer,
+};
 // use groundhog::RollingTimer;
-use anachro_485::{dispatch::{IoQueue, Dispatch}, dom::{DISCOVERY_PORT, TOKEN_PORT}, sub::token::Token};
 use anachro_485::icd::{SLAB_SIZE, TOTAL_SLABS};
+use anachro_485::{
+    dispatch::{Dispatch, IoQueue},
+    dom::{DISCOVERY_PORT, TOKEN_PORT},
+    sub::token::Token,
+};
 use byte_slab::BSlab;
 use groundhog_nrf52::GlobalRollingTimer;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
-use uarte_485::{Pin485, Uarte485, DefaultTo};
+use uarte_485::{DefaultTo, Pin485, Uarte485};
 
 use anachro_485::sub::discover::Discovery;
 use cassette::{pin_mut, Cassette};
@@ -45,18 +56,18 @@ const APP: () = {
 
         let mut led1 = pins.led_1.into_push_pull_output(Level::High).degrade();
         let mut led2 = pins.led_2.into_push_pull_output(Level::High).degrade();
-        let _ = pins.rs1_de.into_push_pull_output(Level::Low);      // Disabled
-        let _ = pins.rs1_re_n.into_push_pull_output(Level::High);   // Disabled
+        let _ = pins.rs1_de.into_push_pull_output(Level::Low); // Disabled
+        let _ = pins.rs1_re_n.into_push_pull_output(Level::High); // Disabled
         let ppi = PpiParts::new(board.PPI);
 
         for _ in 0..3 {
             let start = timer.get_ticks();
             led1.set_low().ok();
             led2.set_low().ok();
-            while timer.millis_since(start) <= 250 { }
+            while timer.millis_since(start) <= 250 {}
             led1.set_high().ok();
             led2.set_high().ok();
-            while timer.millis_since(start) <= 1000 { }
+            while timer.millis_since(start) <= 1000 {}
         }
 
         let mut rand = Rng::new(board.RNG);
@@ -84,7 +95,12 @@ const APP: () = {
             DefaultTo::Receiving,
         );
 
-        init::LateResources { usart: uarrr, opt_rng: Some((rand_1, rand_2)), led1, led2 }
+        init::LateResources {
+            usart: uarrr,
+            opt_rng: Some((rand_1, rand_2)),
+            led1,
+            led2,
+        }
     }
 
     #[idle(resources = [opt_rng, led1, led2])]
@@ -93,10 +109,8 @@ const APP: () = {
 
         let (rand_1, rand_2) = ctx.resources.opt_rng.take().unwrap();
 
-        let disco_socket = DISPATCH
-            .register_port(DISCOVERY_PORT).unwrap();
-        let token_socket = DISPATCH
-            .register_port(TOKEN_PORT).unwrap();
+        let disco_socket = DISPATCH.register_port(DISCOVERY_PORT).unwrap();
+        let token_socket = DISPATCH.register_port(TOKEN_PORT).unwrap();
 
         let mut sub_disco: Discovery<GlobalRollingTimer, _> =
             Discovery::new(rand_1, &DISPATCH, disco_socket, &BSLAB);

@@ -1,4 +1,16 @@
-use crate::{async_sleep_millis, dispatch::{DispatchSocket, LocalPacket}, icd::{AddrPort, DomDiscoveryPayload, DomTokenGrantPayload, SLAB_SIZE, SubDiscoveryPayload, SubTokenReleasePayload, TOTAL_SLABS, VecAddr}, receive_timeout_micros, timing::{DOM_BROADCAST_MAX_WAIT_US, DOM_BROADCAST_MIN_WAIT_US, DOM_PING_MAX_WAIT_US, DOM_PING_MIN_WAIT_US}};
+use crate::{
+    async_sleep_millis,
+    dispatch::{DispatchSocket, LocalPacket},
+    icd::{
+        AddrPort, DomDiscoveryPayload, DomTokenGrantPayload, SubDiscoveryPayload,
+        SubTokenReleasePayload, VecAddr, SLAB_SIZE, TOTAL_SLABS,
+    },
+    receive_timeout_micros,
+    timing::{
+        DOM_BROADCAST_MAX_WAIT_US, DOM_BROADCAST_MIN_WAIT_US, DOM_PING_MAX_WAIT_US,
+        DOM_PING_MIN_WAIT_US,
+    },
+};
 
 use core::{iter::FromIterator, marker::PhantomData, ops::Deref};
 
@@ -48,7 +60,7 @@ where
     pub async fn poll(&mut self) -> ! {
         loop {
             match self.poll_inner().await {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(_) => {
                     defmt::warn!("Bad tokening!");
                 }
@@ -92,16 +104,19 @@ where
             let start = timer.get_ticks();
 
             'inner: loop {
-                let maybe_msg =
-                    receive_timeout_micros::<R, SubTokenReleasePayload>(&mut self.socket, start, 50_000)
-                        .await;
+                let maybe_msg = receive_timeout_micros::<R, SubTokenReleasePayload>(
+                    &mut self.socket,
+                    start,
+                    50_000,
+                )
+                .await;
 
                 let msg = match maybe_msg {
                     Some(msg) => msg,
                     None => {
                         defmt::warn!("No response from {=u8}!", addr);
                         break 'inner;
-                    },
+                    }
                 };
 
                 let good_src = msg.hdr.src == addr_port;

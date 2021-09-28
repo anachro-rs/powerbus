@@ -3,15 +3,26 @@
 
 use core::{
     marker::PhantomData,
-    ops::{DerefMut, Deref},
+    ops::{Deref, DerefMut},
     sync::atomic::{compiler_fence, Ordering::SeqCst},
 };
 
-use anachro_485::{dispatch::{IoHandle, TimeStampBox}, icd::{SLAB_SIZE, TOTAL_SLABS}};
+use anachro_485::{
+    dispatch::{IoHandle, TimeStampBox},
+    icd::{SLAB_SIZE, TOTAL_SLABS},
+};
 use byte_slab::{BSlab, ManagedArcSlab, SlabBox};
-use nrf52840_hal::{gpio::{Disconnected, Floating, Input, Level, Output, Pin, PushPull}, pac::{Interrupt, TIMER0, TIMER1, TIMER2, TIMER3, TIMER4, UARTE0, UARTE1}, ppi::{ConfigurablePpi, Ppi}, prelude::OutputPin, target_constants::EASY_DMA_SIZE, timer::Instance as TimerInstance, uarte::{Baudrate, Instance as UarteInstance, Parity, Pins}};
-use defmt::{info, warn, error};
+use defmt::{error, info, warn};
 use groundhog::RollingTimer;
+use nrf52840_hal::{
+    gpio::{Disconnected, Floating, Input, Level, Output, Pin, PushPull},
+    pac::{Interrupt, TIMER0, TIMER1, TIMER2, TIMER3, TIMER4, UARTE0, UARTE1},
+    ppi::{ConfigurablePpi, Ppi},
+    prelude::OutputPin,
+    target_constants::EASY_DMA_SIZE,
+    timer::Instance as TimerInstance,
+    uarte::{Baudrate, Instance as UarteInstance, Parity, Pins},
+};
 
 type UarteBSlab = BSlab<TOTAL_SLABS, SLAB_SIZE>;
 type UarteBox = SlabBox<TOTAL_SLABS, SLAB_SIZE>;
@@ -175,7 +186,13 @@ where
         if self.uarte.events_endtx.read().events_endtx().bit_is_set() {
             defmt::trace!("endtx")
         }
-        if self.uarte.events_txstopped.read().events_txstopped().bit_is_set() {
+        if self
+            .uarte
+            .events_txstopped
+            .read()
+            .events_txstopped()
+            .bit_is_set()
+        {
             defmt::trace!("txstopped")
         }
         if self.uarte.events_endrx.read().events_endrx().bit_is_set() {
@@ -201,7 +218,7 @@ where
             // We need to idle for one microsecond to allow the
             // transmitter to activate
             self.timer.timer_start(1u32);
-            while self.timer.timer_running() { }
+            while self.timer.timer_running() {}
             self.timer.timer_reset_event();
         }
 
@@ -249,7 +266,13 @@ where
         if !endtx {
             return Err(());
         }
-        while self.uarte.events_txstopped.read().events_txstopped().bit_is_set() { }
+        while self
+            .uarte
+            .events_txstopped
+            .read()
+            .events_txstopped()
+            .bit_is_set()
+        {}
 
         let sent = self.uarte.txd.amount.read().amount().bits() as usize;
         defmt::assert_eq!(sent, msg.len());
@@ -262,7 +285,7 @@ where
             // We need to idle for one microsecond to allow the
             // transmitter to activate
             self.timer.timer_start(1u32);
-            while self.timer.timer_running() { }
+            while self.timer.timer_running() {}
             self.timer.timer_reset_event();
         }
 
@@ -331,26 +354,35 @@ where
                 unsafe { w.maxcnt().bits(rx_buffer.len() as _) });
 
             self.uarte.intenset.write(|w| w.rxdrdy().set_bit());
-            self.uarte.events_rxdrdy.write(|w| w.events_rxdrdy().clear_bit());
+            self.uarte
+                .events_rxdrdy
+                .write(|w| w.events_rxdrdy().clear_bit());
             self.uarte.intenclr.write(|w| w.endrx().set_bit());
 
             // Start UARTE Receive transaction
             self.uarte.tasks_startrx.write(|w|
                 // `1` is a valid value to write to task registers.
-                w.tasks_startrx().set_bit()
-            );
+                w.tasks_startrx().set_bit());
         }
     }
 
     pub fn prepare_steady_recv(&mut self) -> Result<(), ()> {
-        if self.uarte.events_rxdrdy.read().events_rxdrdy().bit_is_clear() {
+        if self
+            .uarte
+            .events_rxdrdy
+            .read()
+            .events_rxdrdy()
+            .bit_is_clear()
+        {
             return Err(());
         }
         defmt::trace!("done.");
         // Manage Uarte
         {
             self.uarte.intenclr.write(|w| w.rxdrdy().set_bit());
-            self.uarte.events_endrx.write(|w| w.events_endrx().clear_bit());
+            self.uarte
+                .events_endrx
+                .write(|w| w.events_endrx().clear_bit());
             self.uarte.intenset.write(|w| w.endrx().set_bit());
         }
 
@@ -374,7 +406,6 @@ where
     }
 
     pub fn complete_recv(&mut self, sbox: UarteBox) {
-
         {
             self.timer.disable_interrupt();
             self.timer.timer_cancel();
@@ -397,7 +428,9 @@ where
 
             // Disable endrx interrupt
             self.uarte.intenclr.write(|w| w.endrx().set_bit());
-            self.uarte.events_endrx.write(|w| w.events_endrx().clear_bit());
+            self.uarte
+                .events_endrx
+                .write(|w| w.events_endrx().clear_bit());
 
             // Reset the event flag
             self.uarte.events_rxto.write(|w| w);
@@ -407,7 +440,9 @@ where
 
             // Wait for the flush to complete.
             while self.uarte.events_endrx.read().bits() == 0 {}
-            self.uarte.events_endrx.write(|w| w.events_endrx().clear_bit());
+            self.uarte
+                .events_endrx
+                .write(|w| w.events_endrx().clear_bit());
 
             compiler_fence(SeqCst);
 
@@ -444,7 +479,7 @@ where
 
         if self.io_hdl.auth().is_flush_authd() {
             self.io_hdl.auth().clear_send_auth();
-            while let Some(_) = self.io_hdl.pop_outgoing() { }
+            while let Some(_) = self.io_hdl.pop_outgoing() {}
         }
 
         let mut again = Again::No;
@@ -452,9 +487,7 @@ where
         core::mem::swap(&mut old_state, &mut self.state);
 
         self.state = match old_state {
-            State485::Idle => {
-                self.handle_idle()
-            },
+            State485::Idle => self.handle_idle(),
             State485::RxAwaitFirstByte(sbox) => {
                 if !self.timer.timer_running() {
                     if !self.should_be_rxin() {
@@ -467,12 +500,10 @@ where
                 } else {
                     match self.prepare_steady_recv() {
                         Ok(_) => State485::RxReceiving(sbox),
-                        Err(_) => {
-                            State485::RxAwaitFirstByte(sbox)
-                        }
+                        Err(_) => State485::RxAwaitFirstByte(sbox),
                     }
                 }
-            },
+            }
             State485::RxReceiving(sbox) => {
                 let timer_done = !self.timer.timer_running();
                 let recv_done = self.uarte.events_endrx.read().events_endrx().bit_is_set();
@@ -485,24 +516,19 @@ where
                 } else {
                     State485::RxReceiving(sbox)
                 }
-            },
-            State485::TxSending(msg) => {
-                match self.complete_send(&msg) {
-                    Ok(_) => {
-                        defmt::info!("{:?}", msg.deref());
-                        again = Again::Yes;
-                        defmt::info!("Done sending.");
-                        State485::Idle
-                    }
-                    Err(_) => {
-                        State485::TxSending(msg)
-                    }
+            }
+            State485::TxSending(msg) => match self.complete_send(&msg) {
+                Ok(_) => {
+                    defmt::info!("{:?}", msg.deref());
+                    again = Again::Yes;
+                    defmt::info!("Done sending.");
+                    State485::Idle
                 }
-
+                Err(_) => State485::TxSending(msg),
             },
             State485::Invalid => {
                 defmt::panic!("Invalid state in Uarte485!");
-            },
+            }
         };
 
         again
@@ -527,11 +553,9 @@ where
             false
         };
 
-        force_rx ||
-            (
-                !matches!(self.default_to, DefaultTo::Sending) &&
-                !self.io_hdl.auth().is_send_authd()
-            )
+        force_rx
+            || (!matches!(self.default_to, DefaultTo::Sending)
+                && !self.io_hdl.auth().is_send_authd())
     }
 
     fn handle_idle(&mut self) -> State485 {
@@ -558,7 +582,9 @@ where
             } else {
                 // Schedule a timer here for 1ms from now to maybe try again
                 self.io_hdl.auth().mark_empty();
-                self.uarte.intenclr.write(|w| unsafe { w.bits(0xFFFF_FFFF) });
+                self.uarte
+                    .intenclr
+                    .write(|w| unsafe { w.bits(0xFFFF_FFFF) });
                 self.setup_timer_interrupt_oneshot_us(1_000);
                 State485::Idle
             }
@@ -568,7 +594,9 @@ where
                 State485::RxAwaitFirstByte(sbox)
             } else {
                 defmt::warn!("Wanted to receive, but no box allocated!");
-                self.uarte.intenclr.write(|w| unsafe { w.bits(0xFFFF_FFFF) });
+                self.uarte
+                    .intenclr
+                    .write(|w| unsafe { w.bits(0xFFFF_FFFF) });
                 self.setup_timer_interrupt_oneshot_us(10_000);
                 State485::Idle
             }

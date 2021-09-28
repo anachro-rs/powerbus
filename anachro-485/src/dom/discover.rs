@@ -1,4 +1,13 @@
-use crate::{async_sleep_millis, dispatch::{DispatchSocket, LocalPacket}, icd::{AddrPort, DomDiscoveryPayload, SubDiscoveryPayload, VecAddr, SLAB_SIZE, TOTAL_SLABS}, receive_timeout_micros, timing::{DOM_BROADCAST_MAX_WAIT_US, DOM_BROADCAST_MIN_WAIT_US, DOM_PING_MAX_WAIT_US, DOM_PING_MIN_WAIT_US}};
+use crate::{
+    async_sleep_millis,
+    dispatch::{DispatchSocket, LocalPacket},
+    icd::{AddrPort, DomDiscoveryPayload, SubDiscoveryPayload, VecAddr, SLAB_SIZE, TOTAL_SLABS},
+    receive_timeout_micros,
+    timing::{
+        DOM_BROADCAST_MAX_WAIT_US, DOM_BROADCAST_MIN_WAIT_US, DOM_PING_MAX_WAIT_US,
+        DOM_PING_MIN_WAIT_US,
+    },
+};
 
 use core::{iter::FromIterator, marker::PhantomData, ops::Deref};
 
@@ -34,7 +43,7 @@ where
         socket: DispatchSocket<'static>,
         rand: A,
         alloc: &'static BSlab<TOTAL_SLABS, SLAB_SIZE>,
-        table: &'static AddrTable32
+        table: &'static AddrTable32,
     ) -> Self {
         Self {
             _timer: PhantomData,
@@ -60,7 +69,6 @@ where
                     self.last_disc = None;
                 }
             }
-
 
             if !self.boost_mode {
                 async_sleep_millis::<R>(timer.get_ticks(), 1000u32).await;
@@ -127,7 +135,8 @@ where
 
         let table = &mut self.table;
         gos.iter()
-            .try_for_each(|g| table.commit_reserved_addr(*g)).unwrap();
+            .try_for_each(|g| table.commit_reserved_addr(*g))
+            .unwrap();
 
         Ok(gos.len())
     }
@@ -158,9 +167,12 @@ where
             let start = timer.get_ticks();
 
             'inner: loop {
-                let maybe_msg =
-                    receive_timeout_micros::<R, SubDiscoveryPayload>(&mut self.socket, start, DOM_PING_MAX_WAIT_US)
-                        .await;
+                let maybe_msg = receive_timeout_micros::<R, SubDiscoveryPayload>(
+                    &mut self.socket,
+                    start,
+                    DOM_PING_MAX_WAIT_US,
+                )
+                .await;
 
                 let msg = match maybe_msg {
                     Some(msg) => msg,
@@ -216,9 +228,12 @@ where
 
         // Collect until timeout, or max messages received
         while !resps.is_full() {
-            let maybe_msg =
-                receive_timeout_micros::<R, SubDiscoveryPayload>(&mut self.socket, start, DOM_BROADCAST_MAX_WAIT_US)
-                    .await;
+            let maybe_msg = receive_timeout_micros::<R, SubDiscoveryPayload>(
+                &mut self.socket,
+                start,
+                DOM_BROADCAST_MAX_WAIT_US,
+            )
+            .await;
 
             if let Some(msg) = maybe_msg {
                 resps.push(msg).map_err(drop)?;
@@ -283,8 +298,11 @@ where
         for (addr, sub_random) in response_pairs.iter() {
             defmt::info!("ACCEPTING: {:?}", addr);
             if let Ok(_) = accepted.push(*addr) {
-                let msg =
-                    DomDiscoveryPayload::generate_discover_ack_ack(*addr, self.rand.gen(), *sub_random);
+                let msg = DomDiscoveryPayload::generate_discover_ack_ack(
+                    *addr,
+                    self.rand.gen(),
+                    *sub_random,
+                );
 
                 let msg = LocalPacket::from_parts_with_alloc(
                     msg.body,

@@ -10,13 +10,16 @@ use nrf52840_hal::{
     Timer,
 };
 // use groundhog::RollingTimer;
-use anachro_485::{dispatch::{IoQueue, Dispatch}, dom::{AddrTable32, DISCOVERY_PORT, TOKEN_PORT, token::Token}};
 use anachro_485::icd::{SLAB_SIZE, TOTAL_SLABS};
+use anachro_485::{
+    dispatch::{Dispatch, IoQueue},
+    dom::{token::Token, AddrTable32, DISCOVERY_PORT, TOKEN_PORT},
+};
 use byte_slab::BSlab;
 use groundhog_nrf52::GlobalRollingTimer;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
-use uarte_485::{Pin485, Uarte485, DefaultTo};
+use uarte_485::{DefaultTo, Pin485, Uarte485};
 
 use anachro_485::dom::discover::Discovery;
 use cassette::{pin_mut, Cassette};
@@ -49,8 +52,8 @@ const APP: () = {
 
         let _led1 = pins.led_1.into_push_pull_output(Level::High);
         let _led2 = pins.led_2.into_push_pull_output(Level::High);
-        let _ = pins.rs1_de.into_push_pull_output(Level::Low);      // Disabled
-        let _ = pins.rs1_re_n.into_push_pull_output(Level::High);   // Disabled
+        let _ = pins.rs1_de.into_push_pull_output(Level::Low); // Disabled
+        let _ = pins.rs1_re_n.into_push_pull_output(Level::High); // Disabled
         let ppi = PpiParts::new(board.PPI);
 
         let mut rand = Rng::new(board.RNG);
@@ -80,8 +83,11 @@ const APP: () = {
         let dispatch: Dispatch<8> = Dispatch::new(&IOQ, &BSLAB);
         dispatch.set_addr(0);
 
-
-        init::LateResources { usart: uarrr, dispatch, opt_rng: Some((rand_1, rand_2)) }
+        init::LateResources {
+            usart: uarrr,
+            dispatch,
+            opt_rng: Some((rand_1, rand_2)),
+        }
     }
 
     #[idle(resources = [dispatch, opt_rng])]
@@ -94,7 +100,8 @@ const APP: () = {
         let disco_socket = ctx
             .resources
             .dispatch
-            .register_port(DISCOVERY_PORT).unwrap();
+            .register_port(DISCOVERY_PORT)
+            .unwrap();
 
         let mut dom_disco: Discovery<GlobalRollingTimer, _> =
             Discovery::new(disco_socket, rand_1, &BSLAB, &ADDR_TABLE);
@@ -102,10 +109,7 @@ const APP: () = {
         pin_mut!(dom_disco_future);
 
         // GRANT
-        let grant_socket = ctx
-            .resources
-            .dispatch
-            .register_port(TOKEN_PORT).unwrap();
+        let grant_socket = ctx.resources.dispatch.register_port(TOKEN_PORT).unwrap();
 
         let mut dom_token: Token<GlobalRollingTimer, _> =
             Token::new(grant_socket, rand_2, &BSLAB, &ADDR_TABLE);

@@ -131,9 +131,7 @@ impl IoHandle {
     pub fn pop_outgoing(&mut self) -> Option<OutgoingSlab> {
         match self.ioq.to_io_hi_prio.dequeue() {
             a @ Some(_) => a,
-            None => {
-                self.ioq.to_io.dequeue()
-            }
+            None => self.ioq.to_io.dequeue(),
         }
     }
 
@@ -284,7 +282,7 @@ impl<const PORTS: usize> Dispatch<PORTS> {
         let auth = match port {
             crate::dom::DISCOVERY_PORT => Some(&self.ioq.io_auth),
             crate::dom::TOKEN_PORT => Some(&self.ioq.io_auth),
-            _ => None
+            _ => None,
         };
 
         // Try to find a free port.
@@ -302,7 +300,7 @@ impl<const PORTS: usize> Dispatch<PORTS> {
                     port: nzport,
                     to_task: &slot.to_task,
                     to_dispatch: &slot.to_dispatch,
-                    send_auth: auth
+                    send_auth: auth,
                 }
             })
     }
@@ -341,12 +339,12 @@ impl<const PORTS: usize> Dispatch<PORTS> {
             Some(addr) => {
                 defmt::warn!("not for us! {=u8}", addr);
                 Err(ProcessMessageError::DestAddr)
-            },
+            }
 
             None => {
                 defmt::warn!("not for anyone!");
                 Err(ProcessMessageError::DestAddr)
-            },
+            }
         }?;
 
         let good = lm
@@ -484,19 +482,19 @@ impl<const PORTS: usize> Dispatch<PORTS> {
             .map_err(|_| ProcessMessageError::Arc)?;
 
         let mas = ManagedArcSlab::Owned(ssa);
-        let ogs = OutgoingSlab { packet: mas, receive_ticks_min: lp.response_wait_ticks };
+        let ogs = OutgoingSlab {
+            packet: mas,
+            receive_ticks_min: lp.response_wait_ticks,
+        };
 
         if (port == crate::dom::DISCOVERY_PORT) || (port == crate::dom::TOKEN_PORT) {
             self.ioq.to_io_hi_prio.enqueue(ogs).ok();
             Ok(())
         } else {
-            self.ioq
-                .to_io
-                .enqueue(ogs)
-                .map_err(|ssa| {
-                    self.shame.enqueue(ssa).ok();
-                    ProcessMessageError::IoQueueFull
-                })
+            self.ioq.to_io.enqueue(ogs).map_err(|ssa| {
+                self.shame.enqueue(ssa).ok();
+                ProcessMessageError::IoQueueFull
+            })
         }
     }
 }
@@ -505,7 +503,7 @@ pub struct DispatchSocket<'a> {
     port: NonZeroU16,
     to_task: &'a MpMcQueue<LocalPacket, TASK_QUEUE_DEPTH>,
     to_dispatch: &'a MpMcQueue<LocalPacket, TASK_QUEUE_DEPTH>,
-    send_auth: Option<&'a IoAuth>
+    send_auth: Option<&'a IoAuth>,
 }
 
 impl<'a> DispatchSocket<'a> {
@@ -519,7 +517,7 @@ impl<'a> DispatchSocket<'a> {
                 self.try_send(pkt)?;
                 auth.enable_one_send();
                 Ok(())
-            },
+            }
             None => Err(pkt),
         }
     }
@@ -535,9 +533,7 @@ impl<'a> DispatchSocket<'a> {
     }
 
     pub fn auth_send(&self) -> Result<(), ()> {
-        self.send_auth
-            .map(|auth| auth.enable_one_send())
-            .ok_or(())
+        self.send_auth.map(|auth| auth.enable_one_send()).ok_or(())
     }
 
     pub fn clear_empty(&self) -> Result<(), ()> {

@@ -3,16 +3,16 @@
 
 use {
     embedded_hal::blocking::delay::DelayMs,
+    groundhog_nrf52::GlobalRollingTimer,
+    hardware_bringup as _, // global logger + panicking-behavior + memory layout
     nrf52840_hal::{
         self as hal,
         gpio::{p0::Parts as P0Parts, p1::Parts as P1Parts, Level},
         Rng, Timer,
     },
-    hardware_bringup as _, // global logger + panicking-behavior + memory layout
     nrf_smartled::pwm::Pwm,
     smart_leds::{colors, gamma, RGB8},
     smart_leds_trait::SmartLedsWrite,
-    groundhog_nrf52::GlobalRollingTimer,
 };
 
 use choreographer::{
@@ -20,12 +20,10 @@ use choreographer::{
     script,
 };
 
-
 const NUM_LEDS: usize = 100;
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
-
     let board = hal::pac::Peripherals::take().unwrap();
 
     let mut timer = Timer::new(board.TIMER0);
@@ -59,7 +57,6 @@ fn main() -> ! {
 
     let mut color_iter = color_path.iter().cycle();
     let mut active_ct: u8 = 10;
-
 
     loop {
         active_ct = active_ct.saturating_sub(1);
@@ -119,12 +116,7 @@ fn main() -> ! {
             }
         }
 
-
-        leds.write(
-            gamma(
-                pixels.iter().cloned()
-            )
-        ).ok();
+        leds.write(gamma(pixels.iter().cloned())).ok();
         timer.delay_ms(5u32);
     }
 }
