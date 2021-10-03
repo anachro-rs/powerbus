@@ -71,6 +71,8 @@ const APP: () = {
             ppi.ppi3,
             board.UARTE0,
             Pin485 {
+                dbg_1: pins.io_1.degrade(),
+                dbg_2: pins.io_2.degrade(),
                 rs_di: pins.rs2_di.degrade(),
                 rs_ro: pins.rs2_ro.degrade(),
                 rs_de: pins.rs2_de.degrade(),

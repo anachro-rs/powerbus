@@ -98,14 +98,17 @@ where
         let start = timer.get_ticks();
         self.socket.clear_empty()?;
         self.socket.auth_send()?;
-        let duration = msg.body.max_time_us / 2;
+        let duration = msg.body.max_time_us.saturating_mul(7) / 8;
 
         while timer.micros_since(start) <= duration {
             if self.socket.is_empty()? {
                 break;
             } else {
                 self.socket.auth_send()?;
-                async_sleep_micros::<R>(timer.get_ticks(), duration / 4).await;
+
+                // The IO will wait 1ms on spurious auth, in the case of
+                // ACTUALLY sending, it will take a bit longer Or not?
+                async_sleep_micros::<R>(timer.get_ticks(), 2_100).await;
             }
         }
 

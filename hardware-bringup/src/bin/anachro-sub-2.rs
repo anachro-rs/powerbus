@@ -60,15 +60,6 @@ const APP: () = {
         let _ = pins.rs1_re_n.into_push_pull_output(Level::High); // Disabled
         let ppi = PpiParts::new(board.PPI);
 
-        for _ in 0..3 {
-            let start = timer.get_ticks();
-            led1.set_low().ok();
-            led2.set_low().ok();
-            while timer.millis_since(start) <= 250 {}
-            led1.set_high().ok();
-            led2.set_high().ok();
-            while timer.millis_since(start) <= 1000 {}
-        }
 
         let mut rand = Rng::new(board.RNG);
 
@@ -86,6 +77,8 @@ const APP: () = {
             ppi.ppi3,
             board.UARTE0,
             Pin485 {
+                dbg_1: pins.io_1.degrade(),
+                dbg_2: pins.io_3.degrade(),
                 rs_di: pins.rs2_di.degrade(),
                 rs_ro: pins.rs2_ro.degrade(),
                 rs_de: pins.rs2_de.degrade(),
@@ -94,6 +87,16 @@ const APP: () = {
             IOQ.take_io_handle().unwrap(),
             DefaultTo::Receiving,
         );
+
+        for _ in 0..3 {
+            let start = timer.get_ticks();
+            led1.set_low().ok();
+            led2.set_low().ok();
+            while timer.millis_since(start) <= 250 {}
+            led1.set_high().ok();
+            led2.set_high().ok();
+            while timer.millis_since(start) <= 1000 {}
+        }
 
         init::LateResources {
             usart: uarrr,

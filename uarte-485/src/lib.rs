@@ -54,10 +54,10 @@ where
 }
 
 enum State485 {
-    Idle,
-    RxAwaitFirstByte(UarteBox),
-    RxReceiving(UarteBox),
-    TxSending(UarteMas),
+    Idle,                       // 0b00
+    RxAwaitFirstByte(UarteBox), // 0b10
+    RxReceiving(UarteBox),      // 0b11
+    TxSending(UarteMas),        // 0b01
     Invalid,
 }
 
@@ -78,11 +78,17 @@ pub struct Pin485 {
     pub rs_ro: Pin<Disconnected>,
     pub rs_de: Pin<Disconnected>,
     pub rs_re_n: Pin<Disconnected>,
+
+    pub dbg_1: Pin<Disconnected>,
+    pub dbg_2: Pin<Disconnected>,
 }
 
 pub struct InternalPin485 {
     rs_de: Pin<Output<PushPull>>,
     rs_re_n: Pin<Output<PushPull>>,
+
+    dbg_1: Pin<Output<PushPull>>,
+    dbg_2: Pin<Output<PushPull>>,
 
     // Don't actually use these two! They are used by the UARTE!
     _rs_di: Pin<Output<PushPull>>,
@@ -118,6 +124,8 @@ where
         let pins = InternalPin485 {
             rs_de: pins.rs_de.into_push_pull_output(Level::Low),
             rs_re_n: pins.rs_re_n.into_push_pull_output(Level::High),
+            dbg_1: pins.dbg_1.into_push_pull_output(Level::High),
+            dbg_2: pins.dbg_2.into_push_pull_output(Level::High),
             _rs_di: pins.rs_di.into_push_pull_output(Level::High),
             _rs_ro: pins.rs_ro.into_floating_input(),
         };
@@ -530,6 +538,7 @@ where
                 defmt::panic!("Invalid state in Uarte485!");
             }
         };
+        self.set_dbg_leds();
 
         again
     }
@@ -612,6 +621,37 @@ where
 
     pub fn timer_interrupt(&mut self) {
         self.uarte_interrupt();
+    }
+
+// enum State485 {
+//                                      21
+//     Idle,                       // 0b00
+//     RxAwaitFirstByte(UarteBox), // 0b10
+//     RxReceiving(UarteBox),      // 0b11
+//     TxSending(UarteMas),        // 0b01
+//     Invalid,
+// }
+
+    fn set_dbg_leds(&mut self) {
+        match self.state {
+            State485::Idle => {
+                self.pins.dbg_1.set_low().ok();
+                self.pins.dbg_2.set_low().ok();
+            },
+            State485::RxAwaitFirstByte(_) => {
+                self.pins.dbg_1.set_low().ok();
+                self.pins.dbg_2.set_high().ok();
+            },
+            State485::RxReceiving(_) => {
+                self.pins.dbg_1.set_high().ok();
+                self.pins.dbg_2.set_high().ok();
+            },
+            State485::TxSending(_) => {
+                self.pins.dbg_1.set_high().ok();
+                self.pins.dbg_2.set_low().ok();
+            },
+            State485::Invalid => { },
+        }
     }
 }
 
