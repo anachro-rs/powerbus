@@ -275,8 +275,26 @@ where
     }
 
     #[inline]
+    pub fn write_word(&mut self, addr: usize, word: u32) {
+        if word == 0xFFFF_FFFF {
+            return;
+        }
+
+        defmt::assert_eq!(addr & 0b11, 0);
+
+        self.wait_ready();
+
+        let mut_ptr = addr as *const u32 as *mut u32;
+
+        unsafe {
+            mut_ptr.write_volatile(word);
+        }
+
+        cortex_m::asm::dmb();
+    }
+
+    #[inline]
     pub fn write_word_app(&mut self, offset_bytes: usize, word: u32) {
-        defmt::info!("{:?}", offset_bytes);
         defmt::assert_eq!(offset_bytes & 0b11, 0);
 
         self.wait_ready();

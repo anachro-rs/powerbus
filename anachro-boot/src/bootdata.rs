@@ -13,12 +13,27 @@ pub struct Bootdata {
 }
 
 impl Bootdata {
-    pub fn write_to(addr: usize) -> Result<(), ()> {
+    pub fn write_to(&self, addr: usize) -> Result<(), ()> {
         if addr & 0b11 != 0 {
             return Err(());
         }
 
-        todo!()
+        let base = addr as *const u8 as *mut u8;
+
+        unsafe {
+            base.add(0).cast::<u32>().write_volatile(0xB007DA7A);
+            base.add(4).cast::<u32>().write_volatile(self.app_metadata.as_ptr() as u32);
+            base.add(8).cast::<u32>().write_volatile(self.own_metadata.as_ptr() as u32);
+            base.add(12).cast::<u32>().write_volatile(self.nxt_metadata.as_ptr() as u32);
+            base.add(16).cast::<u32>().write_volatile(self.nxt_image.as_ptr() as u32);
+            // 20: don't care
+            // 21: don't care
+            base.add(22).cast::<u8>().write_volatile(self.is_first_boot as u8);
+            base.add(23).cast::<u8>().write_volatile(self.is_rollback as u8);
+            base.add(24).cast::<u32>().write_volatile(0xB007DA7A);
+        }
+
+        Ok(())
     }
 
     pub fn load_from(addr: usize) -> Option<Self> {

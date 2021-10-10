@@ -10,6 +10,9 @@ use nrf52840_hal::pac::Peripherals;
 use groundhog::RollingTimer;
 use groundhog_nrf52::GlobalRollingTimer;
 
+static BOOT_1_IMG: &[u8] = include_bytes!("../../test-images/blink_1_app_combo.bin");
+static _BOOT_2_IMG: &[u8] = include_bytes!("../../test-images/blink_2_app_combo.bin");
+
 #[cortex_m_rt::entry]
 fn main() -> ! {
     defmt::info!("Hello, world!");
