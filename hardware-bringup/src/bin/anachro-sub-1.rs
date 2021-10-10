@@ -5,7 +5,7 @@ use groundhog::RollingTimer;
 use hardware_bringup::{self as _, PowerBusPins};
 use nrf52840_hal::{
     gpio::{Level, Output, Pin, PushPull},
-    pac::{Interrupt, SCB, TIMER2, UARTE0},
+    pac::{Interrupt, TIMER2, UARTE0},
     ppi::{Parts as PpiParts, Ppi3},
     prelude::OutputPin,
     rng::Rng,
@@ -20,7 +20,6 @@ use anachro_485::{
 };
 use byte_slab::BSlab;
 use groundhog_nrf52::GlobalRollingTimer;
-use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use uarte_485::{DefaultTo, Pin485, Uarte485};
 
@@ -62,13 +61,8 @@ const APP: () = {
 
         let mut rand = Rng::new(board.RNG);
 
-        let mut seed_1 = [0u8; 32];
-        seed_1.iter_mut().for_each(|t| *t = rand.random_u8());
-        let rand_1 = ChaCha8Rng::from_seed(seed_1);
-
-        let mut seed_2 = [0u8; 32];
-        seed_2.iter_mut().for_each(|t| *t = rand.random_u8());
-        let rand_2 = ChaCha8Rng::from_seed(seed_2);
+        let rand_1 = hardware_bringup::new_chacha_rng(&mut rand);
+        let rand_2 = hardware_bringup::new_chacha_rng(&mut rand);
 
         let uarrr = Uarte485::new(
             &BSLAB,

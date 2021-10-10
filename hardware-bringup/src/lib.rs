@@ -2,19 +2,18 @@
 
 use defmt_rtt as _; // global logger
                     // memory layout
-use nrf52840_hal::{
-    gpio::{
+use nrf52840_hal::{Rng, gpio::{
         p0::{self, Parts as P0Parts},
         p1::{self, Parts as P1Parts},
         Disconnected,
-    },
-    pac::{P0, P1},
-};
+    }, pac::{P0, P1}};
 
 use panic_probe as _;
 
 use groundhog::RollingTimer;
 use groundhog_nrf52::GlobalRollingTimer;
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 
 // same panicking *behavior* as `panic-probe` but doesn't print a panic message
 // this prevents the panic message being printed *twice* when `defmt::panic` is invoked
@@ -101,4 +100,10 @@ impl PowerBusPins {
             rs2_re_n: p0p.p0_12,
         }
     }
+}
+
+pub fn new_chacha_rng(hwrng: &mut Rng) -> ChaCha8Rng {
+    let mut seed = [0u8; 32];
+    seed.iter_mut().for_each(|t| *t = hwrng.random_u8());
+    ChaCha8Rng::from_seed(seed)
 }

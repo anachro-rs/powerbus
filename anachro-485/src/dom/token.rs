@@ -1,16 +1,16 @@
-use crate::{async_sleep_micros, async_sleep_millis, dispatch::{DispatchSocket, LocalPacket}, icd::{
-        AddrPort, DomDiscoveryPayload, DomTokenGrantPayload, SubDiscoveryPayload,
-        SubTokenReleasePayload, VecAddr, SLAB_SIZE, TOTAL_SLABS,
-    }, receive_timeout_micros, timing::{
-        DOM_BROADCAST_MAX_WAIT_US, DOM_BROADCAST_MIN_WAIT_US, DOM_PING_MAX_WAIT_US,
-        DOM_PING_MIN_WAIT_US,
-    }};
+use crate::{
+    async_sleep_micros, async_sleep_millis,
+    dispatch::{DispatchSocket, LocalPacket},
+    icd::{
+        AddrPort, DomTokenGrantPayload, SubTokenReleasePayload, VecAddr, SLAB_SIZE, TOTAL_SLABS,
+    },
+    receive_timeout_micros,
+};
 
-use core::{iter::FromIterator, marker::PhantomData, ops::Deref};
+use core::marker::PhantomData;
 
 use byte_slab::BSlab;
 use groundhog::RollingTimer;
-use heapless::{FnvIndexMap, FnvIndexSet, Vec};
 use rand::Rng;
 
 use crate::dom::AddrTable32;
