@@ -1,5 +1,6 @@
 pub const TTL_PAGES: usize = 256;
 pub const PAGE_SIZE: usize = 4096;
+pub const CHUNK_SIZE: usize = 256;
 
 pub const SECTION_0_START: usize = 0;
 
