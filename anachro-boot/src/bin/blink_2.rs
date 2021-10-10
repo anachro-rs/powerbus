@@ -56,6 +56,12 @@ fn main() -> ! {
 
     strbuf.clear();
     if let Some(bd) = Bootdata::load_from(0x2003FC00) {
+
+        if let (Some(sto_meta), Some(app_meta)) = (Metadata::from_addr(bd.own_metadata), Metadata::from_addr(bd.app_metadata)) {
+            sto_meta.mark_booted(&board.NVMC);
+            app_meta.mark_booted(&board.NVMC);
+        }
+
         write!(&mut strbuf, "Got boot data!\r\n{:#?}\r\n", bd).ok();
     } else {
         write!(&mut strbuf, "No boot data :(\r\n").ok();

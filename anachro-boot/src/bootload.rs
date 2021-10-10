@@ -42,6 +42,22 @@ impl Metadata {
         self.flashed_tagword == Self::FLASHED_TAG_IS_FLASHED
     }
 
+    pub fn mark_booted(&self, nvmc: &NVMC) {
+        let us = Nvmc::new(nvmc, self.section.clone());
+        let base = self.section.metadata_as_ptr();
+
+        if !self.has_booted() {
+            us.enable_write();
+            us.wait_ready();
+            unsafe {
+                core::ptr::write_volatile(base.add(136).cast(), Self::BOOTED_TAG_IS_BOOTED);
+            }
+            us.enable_read();
+        } else {
+            defmt::warn!("Dupe boot mark!");
+        }
+    }
+
     pub fn write_to_section(&self, nvmc: &NVMC, section: UsableSections, boot_seq: u32) {
         let base = section.metadata_as_ptr();
         let us = Nvmc::new(nvmc, section.clone());
@@ -74,6 +90,20 @@ impl Metadata {
         }
 
         cortex_m::asm::dmb();
+    }
+
+    pub fn from_addr(addr: NonNull<u8>) -> Option<Metadata> {
+        let aap = addr.as_ptr();
+
+        if aap == UsableSections::Section1.metadata_as_ptr() {
+            Self::from_section(UsableSections::Section1)
+        } else if aap == UsableSections::Section2.metadata_as_ptr() {
+            Self::from_section(UsableSections::Section2)
+        } else if aap == UsableSections::Section3.metadata_as_ptr() {
+            Self::from_section(UsableSections::Section3)
+        } else {
+            None
+        }
     }
 
     pub fn from_section(section: UsableSections) -> Option<Metadata> {
