@@ -16,6 +16,7 @@ panic-probe = { version = "0.2.0", features = ["print-defmt"] }
 nrf52840-hal = "0.13"
 groundhog = "0.2.0"
 groundhog-nrf52 = "0.3.1"
+heapless = "0.7.7"
 
 [dependencies.poly1305]
 version = "0.7.2"

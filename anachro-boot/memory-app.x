@@ -2,21 +2,21 @@
 
 MEMORY
 {
-  /* NOTE K = KiBi = 1024 bytes */
-/*  FLASH     : ORIGIN = 0x00000000, LENGTH = 256K */
-  FLASH       : ORIGIN = 0x00040000, LENGTH = 256K
-/*  STORAGE1  : ORIGIN = 0x00080000, LENGTH = 256K */
-/*  STORAGE2  : ORIGIN = 0x000C0000, LENGTH = 256K */
-  RAM       : ORIGIN = 0x20000000, LENGTH = 256K
+  METADATA : ORIGIN = 0x00040000, LENGTH = 4K
+  FLASH    : ORIGIN = 0x00041000, LENGTH = 252K
+  RAM      : ORIGIN = 0x20000000, LENGTH = 255K
+  BOOTDATA : ORIGIN = 0x2003FC00, LENGTH = 1K
 }
+
 
 /* Applications should use:                           */
 /*                                                    */
 /* MEMORY                                             */
 /* {                                                  */
-/*   METADATA :   ORIGIN = 0x00040000, LENGTH = 4K    */
-/*   FLASH :      ORIGIN = 0x00041000, LENGTH = 252K  */
-/*   RAM :        ORIGIN = 0x20000000, LENGTH = 256K  */
+/*   METADATA : ORIGIN = 0x00040000, LENGTH = 4K      */
+/*   FLASH    : ORIGIN = 0x00041000, LENGTH = 252K    */
+/*   RAM      : ORIGIN = 0x20000000, LENGTH = 255K    */
+/*   BOOTDATA : ORIGIN = 0x2003FC00, LENGTH = 1K      */
 /* }                                                  */
 /*                                                    */
 
