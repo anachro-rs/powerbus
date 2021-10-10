@@ -6,6 +6,8 @@ use core::ptr::NonNull;
 use nrf52840_hal::nvmc::Instance;
 use poly1305::{Block, Key, Poly1305, universal_hash::{NewUniversalHash, UniversalHash}};
 
+use crate::consts::PAGE_SIZE;
+
 pub const BOOTY_CHUNK_SIZE: usize = 256;
 
 pub struct Booty<T: Instance> {
@@ -154,10 +156,28 @@ impl UsableSections {
     }
 }
 
+
+// NOTE: Datasheet says 85ms, take it up to 100ms for some healthy
+// fudge factor
+const TOTAL_PAGE_ERASE_MS: u32 = 100;
+struct PartialErase {
+    total_ms: u32,
+    step_ms: u32,
+    page: u32,
+}
+
+pub enum PartialStatus {
+    Done,
+    RemainingMs(u32),
+}
+
 /// Interface to an NVMC instance.
 pub struct Nvmc<'a, T: Instance> {
     nvmc: &'a T,
     section: UsableSections,
+
+    // TODO: Refuse to do certain things when this is some
+    wip_erase_ms: Option<PartialErase>,
 }
 
 impl<'a, T> Nvmc<'a, T>
@@ -166,7 +186,56 @@ where
 {
     /// Takes ownership of the peripheral and storage area.
     pub fn new(nvmc: &'a T, section: UsableSections) -> Nvmc<'a, T> {
-        Self { nvmc, section }
+        Self { nvmc, section, wip_erase_ms: None }
+    }
+
+    pub fn start_partial_erase(&mut self, mut steps_ms: u32, start_addr: usize) -> Result<PartialStatus, ()> {
+        if self.wip_erase_ms.is_some() {
+            return Err(());
+        }
+
+        // TODO: also check valid range
+        if start_addr & (PAGE_SIZE - 1) != 0 {
+            return Err(());
+        }
+
+        if steps_ms >= TOTAL_PAGE_ERASE_MS {
+            steps_ms = TOTAL_PAGE_ERASE_MS;
+        }
+
+        self.nvmc.erasepagepartialcfg.write(|w| unsafe {
+            w.duration().bits(steps_ms as u8)
+        });
+
+        self.wip_erase_ms = Some(PartialErase {
+            total_ms: 0,
+            step_ms: steps_ms,
+            page: start_addr as u32,
+        });
+
+        Ok(PartialStatus::RemainingMs(TOTAL_PAGE_ERASE_MS))
+    }
+
+    // NOTE: DOES set write enable!
+    pub fn step_partial_erase(&mut self) -> Result<PartialStatus, ()> {
+        let mut wip = self.wip_erase_ms.take().ok_or(())?;
+
+        self.enable_erase();
+        self.nvmc.erasepagepartial.write(|w| unsafe {
+            w.erasepagepartial().bits(wip.page)
+        });
+        self.wait_ready();
+        self.enable_read();
+
+        wip.total_ms += wip.step_ms;
+
+        if wip.total_ms >= TOTAL_PAGE_ERASE_MS {
+            Ok(PartialStatus::Done)
+        } else {
+            let remain = TOTAL_PAGE_ERASE_MS - wip.total_ms;
+            self.wip_erase_ms = Some(wip);
+            Ok(PartialStatus::RemainingMs(remain))
+        }
     }
 
     pub fn enable_erase(&self) {
