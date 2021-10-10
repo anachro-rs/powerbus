@@ -10,9 +10,6 @@ use nrf52840_hal::pac::Peripherals;
 use groundhog::RollingTimer;
 use groundhog_nrf52::GlobalRollingTimer;
 
-static BOOT_1_IMG: &[u8] = include_bytes!("../../test-images/blink_1_app_combo.bin");
-static _BOOT_2_IMG: &[u8] = include_bytes!("../../test-images/blink_2_app_combo.bin");
-
 #[cortex_m_rt::entry]
 fn main() -> ! {
     defmt::info!("Hello, world!");
@@ -125,7 +122,7 @@ fn main() -> ! {
 
     defmt::info!("Generating new signature...");
     let start = timer.get_ticks();
-    let new_sig = defmt::unwrap!(meta.generate_poly_tag());
+    // let new_sig = defmt::unwrap!(meta.generate_poly_tag());
     let end = timer.ticks_since(start);
 
     // Experimentally: 50kticks (63 pages)
@@ -133,7 +130,7 @@ fn main() -> ! {
     // 256 bytes: 49.6us
     // 4Kibytes:  794us
     defmt::info!("Signature took {=u32} ticks", end);
-    defmt::info!("New sig: {:?}", new_sig);
+    // defmt::info!("New sig: {:?}", new_sig);
 
     defmt::info!("Pause...");
     let start = timer.get_ticks();
