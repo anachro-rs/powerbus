@@ -449,7 +449,7 @@ pub fn make_decision(
                 app_metadata: defmt::unwrap!(NonNull::new(UsableSections::Section1.metadata_as_ptr())),
                 own_metadata: defmt::unwrap!(NonNull::new(UsableSections::Section2.metadata_as_ptr())),
                 nxt_metadata: defmt::unwrap!(NonNull::new(UsableSections::Section3.metadata_as_ptr())),
-                nxt_image: defmt::unwrap!(NonNull::new(UsableSections::Section3.metadata_as_ptr())),
+                nxt_image: defmt::unwrap!(NonNull::new(UsableSections::Section3.app_as_ptr())),
                 is_first_boot: true,
                 is_rollback: false,
             };
@@ -469,7 +469,7 @@ pub fn make_decision(
                 app_metadata: defmt::unwrap!(NonNull::new(UsableSections::Section1.metadata_as_ptr())),
                 own_metadata: defmt::unwrap!(NonNull::new(UsableSections::Section3.metadata_as_ptr())),
                 nxt_metadata: defmt::unwrap!(NonNull::new(UsableSections::Section2.metadata_as_ptr())),
-                nxt_image: defmt::unwrap!(NonNull::new(UsableSections::Section2.metadata_as_ptr())),
+                nxt_image: defmt::unwrap!(NonNull::new(UsableSections::Section2.app_as_ptr())),
                 is_first_boot: true,
                 is_rollback: false,
             };
@@ -525,7 +525,7 @@ pub fn make_decision(
                 // END TODO
 
                 nxt_metadata: defmt::unwrap!(NonNull::new(writeover.metadata_as_ptr())),
-                nxt_image: defmt::unwrap!(NonNull::new(writeover.metadata_as_ptr())),
+                nxt_image: defmt::unwrap!(NonNull::new(writeover.app_as_ptr())),
                 is_first_boot: false,
                 is_rollback: false,
             })
@@ -539,7 +539,7 @@ pub fn make_decision(
                 // TODO: I'm not *sure* if this is right, but it's okay because we only touch this on
                 // first boot.
                 nxt_metadata: defmt::unwrap!(NonNull::new(writeover.metadata_as_ptr())),
-                nxt_image: defmt::unwrap!(NonNull::new(writeover.metadata_as_ptr())),
+                nxt_image: defmt::unwrap!(NonNull::new(writeover.app_as_ptr())),
                 // END TODO
 
                 is_first_boot: false,

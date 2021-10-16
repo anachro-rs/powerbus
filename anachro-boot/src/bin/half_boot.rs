@@ -69,9 +69,11 @@ fn main() -> ! {
     write!(&mut buf, "{:02X?}", decision).ok();
     defmt::info!("{:?}", buf.as_str());
 
+    let mut pause = true;
 
     let bd = match decision {
         BootDecision::Boot(bd) => {
+            pause = false;
             bd
         },
         BootDecision::CopyThenFirstBoot { source, boot_seq, boot_dat } => {
@@ -89,10 +91,12 @@ fn main() -> ! {
         }
     };
 
-    let start = timer.get_ticks();
-    defmt::info!("Booting in 1s!");
+    if pause {
+        let start = timer.get_ticks();
+        defmt::info!("Booting in 1s!");
 
-    while timer.millis_since(start) < 1000 { }
+        while timer.millis_since(start) < 1000 { }
+    }
 
     defmt::unwrap!(bd.write_to(0x2003FC00));
     unsafe {

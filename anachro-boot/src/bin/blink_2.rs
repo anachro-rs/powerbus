@@ -55,9 +55,12 @@ fn main() -> ! {
     defmt::unwrap!(uarte.write(strbuf.as_bytes()).map_err(drop));
 
     strbuf.clear();
-    if let Some(bd) = Bootdata::load_from(0x2003FC00) {
 
-        if let (Some(sto_meta), Some(app_meta)) = (Metadata::from_addr(bd.own_metadata), Metadata::from_addr(bd.app_metadata)) {
+    if let Some(bd) = Bootdata::load_from(0x2003FC00) {
+        let maybe_sto_meta = Metadata::from_addr(bd.own_metadata);
+        let maybe_app_meta = Metadata::from_addr(bd.app_metadata);
+
+        if let (Some(sto_meta), Some(app_meta)) = (maybe_sto_meta, maybe_app_meta) {
             sto_meta.mark_booted(&board.NVMC);
             app_meta.mark_booted(&board.NVMC);
         }
@@ -66,6 +69,7 @@ fn main() -> ! {
     } else {
         write!(&mut strbuf, "No boot data :(\r\n").ok();
     }
+
     defmt::unwrap!(uarte.write(strbuf.as_bytes()).map_err(drop));
 
 
