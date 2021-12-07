@@ -1,458 +1,61 @@
+//! # Byte Slab
+//!
+//! Byte Slab is a crate that provides a pool or slab of bytes, which can be granted in
+//! fixed-size chunks. It is similar to heapless::Pool, however it also allows conversion
+//! of the allocations (`SlabBox`es) into shared, reference counted objects (`SlabArc`s).
+//!
+//! Currently, it maintains its free list as an MPMC queue, though that is an implementation
+//! detail that may change. This implementation is convenient, but not particularly memory-dense.
+//!
+//! The slab is statically allocated, and the size of each Box, as well as the total number of
+//! Boxes available is selected through compile time `const` values.
+//!
+//! Byte Slab is intended to provide boxes suitable for using as DMA buffers on bare metal
+//! embedded systems without a general purpose allocator. All allocations are failable.
+//!
+//! ## Main components
+//!
+//! The byte slab crate is made up of the following primary elements:
+//!
+//! * `BSlab` - a Byte Slab. This struct represents the storage of all boxes and their
+//!     related metadata.
+//! * `SlabBox` - An owned allocation from the BSlab, which may be read or written to
+//!     (exclusively) by the owner. A `SlabBox` may be converted into a `SlabArc`. The
+//!     underlying memory is freed for reuse automatically when the Box has been dropped.
+//! * `SlabArc` - A reference counted allocation from the BSlab, obtained by consuming a
+//!     `SlabBox`. As the underlying allocation may be shared, a `SlabArc` does not allow
+//!     for the contents to be modified. `SlabArc`s may be cloned (which increases the
+//!     reference count), allowing for multiple (immutable) access to the same data. The
+//!     underlying memory is freed for reuse automatically when the reference count reaches
+//!     zero.
+//! * `SlabSliceArc` - a reference counted view of a `SlabArc`. This is used to provide a
+//!     view onto a portion of a `SlabArc`, without sharing the entire allocation. It shares
+//!     the same reference count as the underlying `SlabArc`, meaning the underlying `SlabArc`
+//!     will not be freed if there are only `SlabSliceArc`s remaining. The underlying memory
+//!     is freed for reuse automatically when the reference count reaches zero.
+//! * `ManagedArcSlab` - a convenience type that may contain EITHER a borrowed `&[u8]` slice,
+//!     or a `SlabSliceArc`.
+//!
+//! ## Safety
+//!
+//! This probably does not handle unwind safety correctly!
+//! Please verify before using in non-abort-panic environments!
+
 #![cfg_attr(not(test), no_std)]
 
-use core::marker::PhantomData;
-/// # Byte Slab
-///
-/// TODO: This probably does not handle unwind safety correctly!
-/// Please verify before using in non-abort-panic environments!
-use core::{
-    cell::UnsafeCell,
-    mem::{forget, MaybeUninit},
-    ops::{Deref, DerefMut},
-    slice::from_raw_parts,
-    sync::atomic::{AtomicU8, AtomicUsize, Ordering},
+pub mod byte_slab;
+pub mod slab_arc;
+pub mod slab_box;
+pub mod slab_slice_arc;
+pub mod managed_arc_slab;
+
+pub use crate::{
+    byte_slab::BSlab,
+    slab_arc::SlabArc,
+    slab_box::SlabBox,
+    slab_slice_arc::SlabSliceArc,
+    managed_arc_slab::ManagedArcSlab,
 };
-pub use heapless::mpmc::MpMcQueue;
-
-// TODO: This doesn't HAVE to be 'static, but it makes my life easier
-// if you want not-that, I guess open an issue and let me know?
-pub struct SlabBox<const N: usize, const SZ: usize> {
-    slab: &'static BSlab<N, SZ>,
-    idx: usize,
-}
-
-// TODO: This doesn't HAVE to be 'static, but it makes my life easier
-// if you want not-that, I guess open an issue and let me know?
-pub struct SlabArc<const N: usize, const SZ: usize> {
-    slab: &'static BSlab<N, SZ>,
-    idx: usize,
-}
-
-// TODO: This doesn't HAVE to be 'static, but it makes my life easier
-// if you want not-that, I guess open an issue and let me know?
-#[derive(Clone)]
-pub struct SlabSliceArc<const N: usize, const SZ: usize> {
-    arc: SlabArc<N, SZ>,
-    start: usize,
-    len: usize,
-}
-
-#[derive(Clone)]
-pub enum ManagedArcSlab<'a, const N: usize, const SZ: usize> {
-    Borrowed(&'a [u8]),
-    Owned(SlabSliceArc<N, SZ>),
-}
-
-// ------ SLAB BOX
-
-impl<const N: usize, const SZ: usize> Drop for SlabBox<N, SZ> {
-    fn drop(&mut self) {
-        let arc = unsafe { self.slab.get_idx_unchecked(self.idx).arc };
-
-        // drop refct
-        let zero = arc.compare_exchange(1, 0, Ordering::SeqCst, Ordering::SeqCst);
-        // TODO: Make debug assert?
-        assert!(zero.is_ok());
-
-        // TODO: Why is this necessary?
-        if let Ok(q) = self.slab.get_q() {
-            while let Err(_) = q.enqueue(self.idx) {}
-        }
-
-        // TODO: Zero on drop? As option?
-    }
-}
-
-impl<const N: usize, const SZ: usize> Deref for SlabBox<N, SZ> {
-    type Target = [u8; SZ];
-
-    fn deref(&self) -> &Self::Target {
-        let buf = unsafe { self.slab.get_idx_unchecked(self.idx).buf };
-
-        unsafe { &*buf.get() }
-    }
-}
-
-impl<const N: usize, const SZ: usize> DerefMut for SlabBox<N, SZ> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        let buf = unsafe { self.slab.get_idx_unchecked(self.idx).buf };
-
-        unsafe { &mut *buf.get() }
-    }
-}
-
-impl<const N: usize, const SZ: usize> SlabBox<N, SZ> {
-    pub fn into_arc(self) -> SlabArc<N, SZ> {
-        let arc = unsafe { self.slab.get_idx_unchecked(self.idx).arc };
-
-        let refct = arc.load(Ordering::SeqCst);
-        assert_eq!(1, refct);
-
-        let new_arc = SlabArc {
-            slab: self.slab,
-            idx: self.idx,
-        };
-
-        // Forget the box to avoid the destructor
-        forget(self);
-
-        new_arc
-    }
-
-    pub fn slab(&self) -> &'static BSlab<N, SZ> {
-        self.slab
-    }
-}
-
-// ------ SLAB ARC
-
-impl<const N: usize, const SZ: usize> SlabArc<N, SZ> {
-    pub fn full_sub_slice_arc(&self) -> SlabSliceArc<N, SZ> {
-        SlabSliceArc {
-            arc: self.clone(),
-            start: 0,
-            len: self.len(),
-        }
-    }
-
-    pub fn sub_slice_arc(&self, start: usize, len: usize) -> Result<SlabSliceArc<N, SZ>, ()> {
-        let new_arc = self.clone();
-
-        let new_slice_arc = SlabSliceArc {
-            arc: new_arc,
-            start,
-            len,
-        };
-
-        let good_start = start < SZ;
-        let good_len = (start + len) <= SZ;
-
-        if good_start && good_len {
-            Ok(new_slice_arc)
-        } else {
-            Err(())
-        }
-    }
-
-    pub fn slab(&self) -> &'static BSlab<N, SZ> {
-        self.slab
-    }
-}
-
-impl<const N: usize, const SZ: usize> Drop for SlabArc<N, SZ> {
-    fn drop(&mut self) {
-        // drop refct
-        let arc = unsafe { self.slab.get_idx_unchecked(self.idx).arc };
-        let refct = arc.fetch_sub(1, Ordering::SeqCst);
-
-        // We just dropped the refct to zero. Release the structure
-        if refct == 1 {
-            if let Ok(q) = self.slab.get_q() {
-                while let Err(_) = q.enqueue(self.idx) {}
-            }
-
-        }
-    }
-}
-
-impl<const N: usize, const SZ: usize> Deref for SlabArc<N, SZ> {
-    type Target = [u8; SZ];
-
-    fn deref(&self) -> &Self::Target {
-        let buf = unsafe { self.slab.get_idx_unchecked(self.idx).buf };
-
-        unsafe { &*buf.get() }
-    }
-}
-
-impl<const N: usize, const SZ: usize> Clone for SlabArc<N, SZ> {
-    fn clone(&self) -> Self {
-        let arc = unsafe { self.slab.get_idx_unchecked(self.idx).arc };
-
-        let old_ct = arc.fetch_add(1, Ordering::SeqCst);
-        assert!(old_ct >= 1);
-
-        Self {
-            slab: self.slab,
-            idx: self.idx,
-        }
-    }
-}
-
-// ----------- SLAB SLICE ARC
-
-impl<const N: usize, const SZ: usize> Deref for SlabSliceArc<N, SZ> {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        // thanks mara for the cleaner slice syntax!
-        &self.arc.deref()[self.start..][..self.len]
-    }
-}
-
-impl<const N: usize, const SZ: usize> SlabSliceArc<N, SZ> {
-    pub fn sub_slice_arc(&self, start: usize, len: usize) -> Result<SlabSliceArc<N, SZ>, ()> {
-        let new_arc = self.arc.clone();
-
-        // Offset inside of our own slice
-        let start = self.start + start;
-
-        let new_slice_arc = SlabSliceArc {
-            arc: new_arc,
-            start,
-            len,
-        };
-
-        let new_end = self.start + self.len;
-        let good_start = start < new_end;
-        let good_len = (start + len) <= new_end;
-
-        if good_start && good_len {
-            Ok(new_slice_arc)
-        } else {
-            Err(())
-        }
-    }
-
-    pub fn slab(&self) -> &'static BSlab<N, SZ> {
-        self.arc.slab()
-    }
-}
-
-use core::fmt::Debug;
-use serde::de::Deserialize;
-use serde::ser::Serialize;
-
-impl<'a, const N: usize, const SZ: usize> Debug for ManagedArcSlab<'a, N, SZ> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // TODO: Probably want a better debug impl than this
-        match self {
-            ManagedArcSlab::Borrowed(b) => b.fmt(f),
-            ManagedArcSlab::Owned(o) => o.deref().fmt(f),
-        }
-    }
-}
-
-impl<'a, const N: usize, const SZ: usize> Serialize for ManagedArcSlab<'a, N, SZ> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let data: &[u8] = self.deref();
-        data.serialize(serializer)
-    }
-}
-
-impl<'de: 'a, 'a, const N: usize, const SZ: usize> Deserialize<'de> for ManagedArcSlab<'a, N, SZ> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct ByteVisitor<'a, const N: usize, const SZ: usize> {
-            pd: PhantomData<&'a ()>,
-        }
-
-        impl<'d: 'ai, 'ai, const NI: usize, const SZI: usize> serde::de::Visitor<'d>
-            for ByteVisitor<'ai, NI, SZI>
-        {
-            type Value = ManagedArcSlab<'ai, NI, SZI>;
-
-            fn expecting(&self, _formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
-                todo!()
-            }
-
-            fn visit_borrowed_bytes<E>(self, v: &'d [u8]) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Ok(ManagedArcSlab::Borrowed(v))
-            }
-        }
-        deserializer.deserialize_bytes(ByteVisitor { pd: PhantomData })
-    }
-}
-
-impl<'a, const N: usize, const SZ: usize> Deref for ManagedArcSlab<'a, N, SZ> {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            ManagedArcSlab::Borrowed(data) => data,
-            ManagedArcSlab::Owned(ssa) => ssa.deref(),
-        }
-    }
-}
-
-impl<'a, const N: usize, const SZ: usize> ManagedArcSlab<'a, N, SZ> {
-    pub fn from_arc(arc: &SlabArc<N, SZ>) -> ManagedArcSlab<'static, N, SZ> {
-        ManagedArcSlab::Owned(arc.full_sub_slice_arc())
-    }
-
-    pub fn from_slice(sli: &'a [u8]) -> ManagedArcSlab<'a, N, SZ> {
-        ManagedArcSlab::Borrowed(sli)
-    }
-
-    pub fn from_slab_slice_arc(arc: &SlabSliceArc<N, SZ>) -> ManagedArcSlab<'static, N, SZ> {
-        ManagedArcSlab::Owned(arc.clone())
-    }
-
-    pub fn reroot(self, arc: &SlabArc<N, SZ>) -> Option<ManagedArcSlab<'static, N, SZ>> {
-        match self {
-            ManagedArcSlab::Owned(e) => Some(ManagedArcSlab::Owned(e)),
-            ManagedArcSlab::Borrowed(b) => {
-                if arc.is_empty() || b.is_empty() {
-                    // TODO: nuance
-                    return None;
-                }
-
-                // TODO: yolo ub
-                let start: usize = arc.deref().as_ptr() as usize;
-                let end: usize = start + arc.deref().len();
-                let b_start: usize = b.as_ptr() as usize;
-
-                if (start <= b_start) && (b_start < end) {
-                    let ssa = arc.sub_slice_arc(b_start - start, b.len()).ok()?;
-                    Some(ManagedArcSlab::Owned(ssa))
-                } else {
-                    None
-                }
-            }
-        }
-    }
-}
-
-// -----------
-
-// SAFETY: YOLO
-unsafe impl<const N: usize, const SZ: usize> Send for SlabBox<N, SZ> {}
-
-pub struct BSlab<const N: usize, const SZ: usize> {
-    bufs: MaybeUninit<[UnsafeCell<[u8; SZ]>; N]>,
-    arcs: [AtomicUsize; N],
-
-    // This unsafe abomination is because MpMc does not contain all zeroes
-    // at init time, which "infects" this structure, making the `bufs` also
-    // end up in `.data` instead of `.bss` which makes the firmware much
-    // larger, and the flashing much slower. This is a workaround to force
-    // the contents to be in `.bss`.
-    alloc_q: UnsafeCell<MaybeUninit<MpMcQueue<usize, N>>>,
-    state: AtomicU8,
-}
-
-// SAFETY: YOLO
-unsafe impl<const N: usize, const SZ: usize> Sync for BSlab<N, SZ> {}
-
-struct SlabIdxData<const SZ: usize> {
-    buf: &'static UnsafeCell<[u8; SZ]>,
-    arc: &'static AtomicUsize,
-}
-
-// TODO: I should switch to `atomic-polyfill` to support thumbv6
-impl<const N: usize, const SZ: usize> BSlab<N, SZ> {
-    pub const fn new() -> Self {
-        // thanks, mara, for the const repeated initializer trick!
-        const ZERO_ARC: AtomicUsize = AtomicUsize::new(0);
-        Self {
-            bufs: MaybeUninit::uninit(),
-            arcs: [ZERO_ARC; N],
-            alloc_q: UnsafeCell::new(MaybeUninit::uninit()),
-            state: AtomicU8::new(Self::UNINIT),
-        }
-    }
-
-    const UNINIT: u8 = 0;
-    const INITIALIZING: u8 = 1;
-    const INITIALIZED: u8 = 2;
-
-    pub fn is_init(&self) -> Result<(), ()> {
-        if Self::INITIALIZED == self.state.load(Ordering::SeqCst) {
-            Ok(())
-        } else {
-            Err(())
-        }
-    }
-
-    pub fn get_q(&self) -> Result<&MpMcQueue<usize, N>, ()> {
-        self.is_init()?;
-        unsafe {
-            Ok(&*(*self.alloc_q.get()).as_ptr())
-        }
-    }
-
-    pub fn get_slabs(&self) -> Result<&[UnsafeCell<[u8; SZ]>], ()> {
-        self.is_init()?;
-        unsafe {
-            let buf_ptr = self.bufs.as_ptr().cast::<UnsafeCell<[u8; SZ]>>();
-            let bufs_slice: &[UnsafeCell<[u8; SZ]>] = from_raw_parts(buf_ptr, N);
-            Ok(bufs_slice)
-        }
-    }
-
-    pub fn alloc_box(&'static self) -> Option<SlabBox<N, SZ>> {
-        let idx = self.get_q().ok()?.dequeue()?;
-        let arc = unsafe { self.get_idx_unchecked(idx).arc };
-
-        // Store a refcount of one. This box was not previously allocated,
-        // so we can disregard the previous value
-        arc.store(1, Ordering::SeqCst);
-
-        Some(SlabBox { slab: self, idx })
-    }
-
-    unsafe fn get_idx_unchecked(&'static self, idx: usize) -> SlabIdxData<SZ> {
-        SlabIdxData {
-            buf: &*self.bufs.as_ptr().cast::<UnsafeCell<[u8; SZ]>>().add(idx),
-            arc: &self.arcs[idx],
-        }
-    }
-
-    pub fn init(&self) -> Result<(), ()> {
-        // Begin initialization. Returns an error if the slab was not previously
-        // uninitialized
-        self.state
-            .compare_exchange(
-                Self::UNINIT,
-                Self::INITIALIZING,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            )
-            .map_err(drop)?;
-
-        // Initialize the alloc_q
-        let good_q = unsafe {
-            (*self.alloc_q.get()).as_mut_ptr().write(MpMcQueue::new());
-            &*(*self.alloc_q.get()).as_ptr()
-        };
-
-        // Initialize each slab to zero to prevent UB
-        unsafe {
-            let buf_ptr = self.bufs.as_ptr().cast::<UnsafeCell<[u8; SZ]>>();
-            let bufs_slice: &[UnsafeCell<[u8; SZ]>] = from_raw_parts(buf_ptr, N);
-            for slab in bufs_slice {
-                // Set each unsafecell to zero
-                slab.get().write_bytes(0x00, 1);
-            }
-        }
-
-        // Add all slabs to the allocation queue
-        for i in 0..N {
-            good_q.enqueue(i).map_err(drop)?;
-        }
-
-        // Complete initialization. Returns an error if the slab was not previously
-        // uninitialized
-        self.state
-            .compare_exchange(
-                Self::INITIALIZING,
-                Self::INITIALIZED,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            )
-            .map_err(drop)?;
-
-        Ok(())
-    }
-}
 
 #[cfg(test)]
 mod tests {
