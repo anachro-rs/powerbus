@@ -21,6 +21,32 @@ use crate::slab_arc::SlabArc;
 ///
 /// `SlabBox`s implement the `Deref` and `DerefMut` traits for access to
 /// the underlying allocation
+///
+/// ## Example
+/// ```rust
+/// use byte_slab::BSlab;
+/// use std::thread::spawn;
+///
+/// static SLAB: BSlab<4, 128> = BSlab::new();
+///
+/// fn main() {
+///     // Initialize the byte slab
+///     SLAB.init().unwrap();
+///
+///     let mut box_1 = SLAB.alloc_box().unwrap();
+///
+///     // Fill
+///     assert_eq!(box_1.len(), 128);
+///     box_1.iter_mut().enumerate().for_each(|(i, x)| *x = i as u8);
+///
+///     // We can now send the box to another thread
+///     let hdl = spawn(move || {
+///         box_1.iter().enumerate().for_each(|(i, x)| assert_eq!(i as u8, *x));
+///     });
+///
+///     hdl.join();
+/// }
+/// ```
 pub struct SlabBox<const N: usize, const SZ: usize> {
     pub(crate) slab: &'static BSlab<N, SZ>,
     pub(crate) idx: usize,

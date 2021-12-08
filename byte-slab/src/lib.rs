@@ -36,6 +36,40 @@
 //! * `ManagedArcSlab` - a convenience type that may contain EITHER a borrowed `&[u8]` slice,
 //!     or a `SlabSliceArc`.
 //!
+//! ## Example
+//!
+//! ```rust
+//! use byte_slab::BSlab;
+//!
+//! // Declare a byte slab with four elements, each 128 bytes
+//! static SLAB: BSlab<4, 128> = BSlab::new();
+//!
+//! fn main() {
+//!     // Initialize the byte slab
+//!     SLAB.init().unwrap();
+//!
+//!     // Get the first box
+//!     let mut box_1 = SLAB.alloc_box().unwrap();
+//!
+//!     assert_eq!(box_1.len(), 128);
+//!     box_1.iter_mut().for_each(|i| *i = 42);
+//!
+//!     // We can also get three more boxes
+//!     let mut box_2 = SLAB.alloc_box().unwrap();
+//!     let mut box_3 = SLAB.alloc_box().unwrap();
+//!     let mut box_4 = SLAB.alloc_box().unwrap();
+//!
+//!     // Uh oh, no more boxes!
+//!     assert!(SLAB.alloc_box().is_none());
+//!
+//!     // Until we free one!
+//!     drop(box_2);
+//!
+//!     // Then we can grab one again
+//!     let mut box_4 = SLAB.alloc_box().unwrap();
+//! }
+//! ```
+//!
 //! ## Safety
 //!
 //! This probably does not handle unwind safety correctly!

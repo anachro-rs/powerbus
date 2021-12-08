@@ -19,6 +19,42 @@ use crate::byte_slab::BSlab;
 /// A reference counted, BSlab allocated chunk of bytes.
 ///
 /// `SlabArc`s implement the `Deref` trait for access to the underlying allocation
+///
+/// ## Example
+///
+/// ```rust
+/// use byte_slab::BSlab;
+/// use std::thread::spawn;
+///
+/// static SLAB: BSlab<4, 128> = BSlab::new();
+///
+/// fn main() {
+///     // Initialize the byte slab
+///     SLAB.init().unwrap();
+///
+///     let mut box_1 = SLAB.alloc_box().unwrap();
+///
+///     // Fill
+///     assert_eq!(box_1.len(), 128);
+///     box_1.iter_mut().enumerate().for_each(|(i, x)| *x = i as u8);
+///
+///     // Convert the Box into an Arc for sharing
+///     let arc_1 = box_1.into_arc();
+///
+///     // And we can cheaply clone by increasing the reference count
+///     let arc_1_1 = arc_1.clone();
+///
+///     // We can now send the arc to another thread
+///     let hdl = spawn(move || {
+///         arc_1.iter().enumerate().for_each(|(i, x)| assert_eq!(i as u8, *x));
+///     });
+///
+///     // ... while still retaining a local handle to the same data
+///     arc_1_1.iter().enumerate().for_each(|(i, x)| assert_eq!(i as u8, *x));
+///
+///     hdl.join();
+/// }
+/// ```
 pub struct SlabArc<const N: usize, const SZ: usize> {
     pub(crate) slab: &'static BSlab<N, SZ>,
     pub(crate) idx: usize,
