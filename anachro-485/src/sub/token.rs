@@ -6,14 +6,13 @@ use rand::Rng;
 
 use crate::{
     async_sleep_micros, async_sleep_millis,
-    dispatch::{Dispatch, DispatchSocket, LocalPacket, INVALID_OWN_ADDR},
+    dispatch::{Dispatch, DispatchSocket, LocalPacket},
     dom::TOKEN_PORT,
     icd::{
-        AddrPort, DomDiscoveryPayload, DomTokenGrantPayload, SubDiscoveryPayload,
+        AddrPort, DomTokenGrantPayload,
         SubTokenReleasePayload, VecAddr, SLAB_SIZE, TOTAL_SLABS,
     },
     receive_timeout_micros,
-    timing::{SUB_BROADACKACK_WAIT_US, SUB_INITIAL_DISCO_WAIT_US, SUB_PING_WAIT_US},
 };
 
 pub struct Token<R, A>
@@ -24,7 +23,7 @@ where
     _timer: PhantomData<R>,
     dispatch: &'static Dispatch<8>,
     socket: DispatchSocket<'static>,
-    rand: A,
+    _rand: A,
     alloc: &'static BSlab<TOTAL_SLABS, SLAB_SIZE>,
     bad_ticks: u8,
 }
@@ -42,7 +41,7 @@ where
     ) -> Self {
         Self {
             _timer: PhantomData,
-            rand,
+            _rand: rand,
             socket,
             alloc,
             dispatch,
