@@ -1,7 +1,13 @@
-use std::{env, path::PathBuf};
+use std::{
+    env,
+    path::PathBuf,
+    fs::File,
+    io::Write,
+};
 
 fn main() {
     println!("cargo:rerun-if-env-changed=DEFMT_BBQ_BUFFER_SIZE");
+    println!("cargo:rerun-if-env-changed=DEFMT_BBQ_MAX_MSG_SIZE");
 
     let size = env::var("DEFMT_BBQ_BUFFER_SIZE")
         .map(|s| {
@@ -10,12 +16,19 @@ fn main() {
         })
         .unwrap_or(1024_usize);
 
+    let size_msg = env::var("DEFMT_BBQ_MAX_MSG_SIZE")
+        .map(|s| {
+            s.parse()
+                .expect("could not parse DEFMT_BBQ_MAX_MSG_SIZE as usize")
+        })
+        .unwrap_or(127_usize);
+
     let out_dir_path = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let out_file_path = out_dir_path.join("consts.rs");
+    let mut out_file = File::create(&out_file_path).unwrap();
 
-    std::fs::write(
-        out_file_path,
-        format!("pub(crate) const BUF_SIZE: usize = {};", size),
-    )
-    .unwrap();
+    out_file.write_all(format!("pub(crate) const BUF_SIZE: usize = {};\n", size).as_bytes()).unwrap();
+    out_file.write_all(format!("pub(crate) const MAX_MSG_SIZE: usize = {};\n", size_msg).as_bytes()).unwrap();
+
+    out_file.flush().unwrap();
 }

@@ -1,38 +1,132 @@
-//! [`defmt`](https://github.com/knurling-rs/defmt) global logger over RTT.
-//!
-//! NOTE when using this crate it's not possible to use (link to) the `rtt-target` crate
-//!
-//! To use this crate, link to it by importing it somewhere in your project.
-//!
-//! ```
-//! // src/main.rs or src/bin/my-app.rs
-//! use defmt_rtt as _;
-//! ```
-//!
-//! # Blocking/Non-blocking
-//!
-//! `probe-run` puts RTT into blocking-mode, to avoid losing data.
-//!
-//! As an effect this implementation may block forever if `probe-run` disconnects on runtime. This
-//! is because the RTT buffer will fill up and writing will eventually halt the program execution.
-//!
-//! `defmt::flush` would also block forever in that case.
-
 #![no_std]
-
-mod channel;
-
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-use cortex_m::{interrupt, register};
-
-use crate::channel::Channel;
 
 mod consts;
 
-/// RTT buffer size. Default: 1024; can be customized by setting the `DEFMT_RTT_BUFFER_SIZE` environment variable.
+use core::{
+    cell::UnsafeCell,
+    mem::MaybeUninit,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+};
+use cortex_m::{interrupt, register};
+use bbqueue::{BBBuffer, Consumer, Producer, GrantW};
+
+/// BBQueue buffer size. Default: 1024; can be customized by setting the `DEFMT_RTT_BUFFER_SIZE` environment variable.
 /// Use a power of 2 for best performance.
-use crate::consts::BUF_SIZE;
+use crate::consts::{BUF_SIZE, MAX_MSG_SIZE};
+
+struct UnsafeProducer {
+    uc_mu_fp: UnsafeCell<MaybeUninit<Producer<'static, BUF_SIZE>>>,
+}
+
+impl UnsafeProducer {
+    const fn new() -> Self {
+        Self {
+            uc_mu_fp: UnsafeCell::new(MaybeUninit::uninit()),
+        }
+    }
+
+    // TODO: Could be made safe if we ensure the reference is only taken
+    // once. For now, leave unsafe
+    unsafe fn get_mut(&self) -> &mut Producer<'static, BUF_SIZE> {
+        assert_eq!(logstate::INIT_IDLE, BBQ_STATE.load(Ordering::Relaxed));
+
+        // NOTE: `UnsafeCell` and `MaybeUninit` are both `#[repr(Transparent)],
+        // meaning this direct cast is acceptable
+        let const_ptr: *const Producer<'static, BUF_SIZE> = self.uc_mu_fp.get().cast();
+        let mut_ptr: *mut Producer<'static, BUF_SIZE> = const_ptr as *mut _;
+        let ref_mut: &mut Producer<'static, BUF_SIZE> = &mut *mut_ptr;
+        ref_mut
+    }
+}
+
+unsafe impl Sync for UnsafeProducer {}
+
+struct UnsafeGrantW {
+    uc_mu_fgw: UnsafeCell<MaybeUninit<GrantW<'static, BUF_SIZE>>>,
+}
+
+impl UnsafeGrantW {
+    const fn new() -> Self {
+        Self {
+            uc_mu_fgw: UnsafeCell::new(MaybeUninit::uninit()),
+        }
+    }
+
+    // TODO: Could be made safe if we ensure the reference is only taken
+    // once. For now, leave unsafe.
+    //
+    // MUST be done in a critical section.
+    unsafe fn put(&self, grant: GrantW<'static, BUF_SIZE>) {
+        assert_eq!(logstate::INIT_IDLE, BBQ_STATE.load(Ordering::Relaxed));
+        self.uc_mu_fgw.get().write(MaybeUninit::new(grant));
+        BBQ_STATE.store(logstate::INIT_GRANT, Ordering::Relaxed);
+    }
+
+    unsafe fn take(&self) -> GrantW<'static, BUF_SIZE> {
+        assert_eq!(logstate::INIT_GRANT, BBQ_STATE.load(Ordering::Relaxed));
+
+        // NOTE: UnsafeCell and MaybeUninit are #[repr(Transparent)], so this
+        // cast is acceptable
+        let grant = self
+            .uc_mu_fgw
+            .get()
+            .cast::<GrantW<'static, BUF_SIZE>>()
+            .read();
+
+        BBQ_STATE.store(logstate::INIT_IDLE, Ordering::Relaxed);
+
+        grant
+    }
+}
+
+unsafe impl Sync for UnsafeGrantW {}
+
+
+
+static BBQ: BBBuffer<BUF_SIZE> = BBBuffer::new();
+static BBQ_STATE: AtomicUsize = AtomicUsize::new(logstate::UNINIT);
+
+static BBQ_PRODUCER: UnsafeProducer = UnsafeProducer::new();
+static BBQ_GRANT_W: UnsafeGrantW = UnsafeGrantW::new();
+
+mod logstate {
+    // BBQ has NOT been initialized
+    // BBQ_PRODUCER has NOT been initialized
+    // BBQ_GRANT has NOT been initialized
+    pub const UNINIT: usize = 0;
+
+    // BBQ HAS been initialized
+    // BBQ_PRODUCER HAS been initialized
+    // BBQ_GRANT has NOT been initialized
+    pub const INIT_IDLE: usize = 1;
+
+    // BBQ HAS been initialized
+    // BBQ_PRODUCER HAS been initialized
+    // BBQ_GRANT HAS been initialized
+    pub const INIT_GRANT: usize = 2;
+}
+
+
+pub fn init() -> Result<Consumer<'static, BUF_SIZE>, bbqueue::Error> {
+    // TODO: In the future we could probably (optionally) use a regular bbqueue
+    // instead of a framed one, as that typically has higher perf for stream-style
+    // operations, and if framing is provided by rzcobs, we are sort of doubling
+    // up on framing here. Let's get it working first though.
+    let (prod, cons) = BBQ.try_split()?;
+
+    // NOTE: We are okay to treat the following as safe, as the BBQueue
+    // split operation is guaranteed to only return Ok once in a
+    // thread-safe manner.
+    unsafe {
+        BBQ_PRODUCER.uc_mu_fp.get().write(MaybeUninit::new(prod));
+    }
+
+
+    // MUST be done LAST
+    BBQ_STATE.store(logstate::INIT_IDLE, Ordering::Release);
+
+    Ok(cons)
+}
 
 #[defmt::global_logger]
 struct Logger;
@@ -61,8 +155,8 @@ unsafe impl defmt::Logger for Logger {
     }
 
     unsafe fn flush() {
-        // SAFETY: if we get here, the global logger mutex is currently acquired
-        handle().flush();
+        // We can't really do anything to flush, as the consumer is
+        // in "userspace". Oh well.
     }
 
     unsafe fn release() {
@@ -83,52 +177,18 @@ unsafe impl defmt::Logger for Logger {
 }
 
 fn do_write(bytes: &[u8]) {
-    unsafe { handle().write_all(bytes) }
-}
+    let mut remaining = bytes;
+    let producer = unsafe { BBQ_PRODUCER.get_mut() };
 
-#[repr(C)]
-struct Header {
-    id: [u8; 16],
-    max_up_channels: usize,
-    max_down_channels: usize,
-    up_channel: Channel,
-}
-
-const MODE_MASK: usize = 0b11;
-/// Block the application if the RTT buffer is full, wait for the host to read data.
-const MODE_BLOCK_IF_FULL: usize = 2;
-/// Don't block if the RTT buffer is full. Truncate data to output as much as fits.
-const MODE_NON_BLOCKING_TRIM: usize = 1;
-
-// make sure we only get shared references to the header/channel (avoid UB)
-/// # Safety
-/// `Channel` API is not re-entrant; this handle should not be held from different execution
-/// contexts (e.g. thread-mode, interrupt context)
-unsafe fn handle() -> &'static Channel {
-    // NOTE the `rtt-target` API is too permissive. It allows writing arbitrary data to any
-    // channel (`set_print_channel` + `rprint*`) and that can corrupt defmt log frames.
-    // So we declare the RTT control block here and make it impossible to use `rtt-target` together
-    // with this crate.
-    #[no_mangle]
-    static mut _SEGGER_RTT: Header = Header {
-        id: *b"SEGGER RTT\0\0\0\0\0\0",
-        max_up_channels: 1,
-        max_down_channels: 0,
-        up_channel: Channel {
-            name: NAME as *const _ as *const u8,
-            buffer: unsafe { &mut BUFFER as *mut _ as *mut u8 },
-            size: BUF_SIZE,
-            write: AtomicUsize::new(0),
-            read: AtomicUsize::new(0),
-            flags: AtomicUsize::new(MODE_NON_BLOCKING_TRIM),
-        },
-    };
-
-    #[cfg_attr(target_os = "macos", link_section = ".uninit,defmt-rtt.BUFFER")]
-    #[cfg_attr(not(target_os = "macos"), link_section = ".uninit.defmt-rtt.BUFFER")]
-    static mut BUFFER: [u8; BUF_SIZE] = [0; BUF_SIZE];
-
-    static NAME: &[u8] = b"defmt\0";
-
-    &_SEGGER_RTT.up_channel
+    while !remaining.is_empty() {
+        if let Ok(mut grant) = producer.grant_max_remaining(remaining.len()) {
+            let min = grant.len().min(remaining.len());
+            grant[..min].copy_from_slice(&remaining[..min]);
+            remaining = &remaining[min..];
+            grant.commit(min);
+        } else {
+            // uh oh. Not much to be done. Sorry about the rest of this message.
+            return;
+        }
+    }
 }
