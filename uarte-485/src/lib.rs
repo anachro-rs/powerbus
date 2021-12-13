@@ -235,6 +235,23 @@ where
         }
     }
 
+    // TODO: In the future I may want to just add an "Unset" variant to DefaultTo,
+    // and always just stay in Idle until a "real" variant is set. I *think* this
+    // will only need to be done at start-up, at least until I implement routing,
+    // where a device will need to listen to find which interface it has a Dom on.
+    //
+    // Either way, for now we are only dealing with single-interface devices, (e.g.
+    // Powerbus Mini, and I think I will reboot after a mode switch, so it
+    // shouldn't be a problem for now.
+    pub fn change_default(&mut self, new_default: DefaultTo) -> Result<(), ()> {
+        if let State485::Idle = self.state {
+            self.default_to = new_default;
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+
     pub fn debug_events(&self) {
         if self.uarte.events_rxdrdy.read().events_rxdrdy().bit_is_set() {
             defmt::trace!("rxdrdy")
