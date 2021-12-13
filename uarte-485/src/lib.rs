@@ -76,19 +76,68 @@ impl State485 {
 pub struct Pin485 {
     pub rs_di: Pin<Disconnected>,
     pub rs_ro: Pin<Disconnected>,
-    pub rs_de: Pin<Disconnected>,
-    pub rs_re_n: Pin<Disconnected>,
 
-    pub dbg_1: Pin<Disconnected>,
-    pub dbg_2: Pin<Disconnected>,
+    pub dbg_1: Option<Pin<Disconnected>>,
+    pub dbg_2: Option<Pin<Disconnected>>,
+
+    pub ctl: ControlPins,
 }
 
-pub struct InternalPin485 {
-    rs_de: Pin<Output<PushPull>>,
-    rs_re_n: Pin<Output<PushPull>>,
+pub enum ControlPins {
+    OnePin {
+        ctl: Pin<Output<PushPull>>,
+    },
+    TwoPins {
+        de: Pin<Output<PushPull>>,
+        re_n: Pin<Output<PushPull>>,
+    }
+}
 
-    dbg_1: Pin<Output<PushPull>>,
-    dbg_2: Pin<Output<PushPull>>,
+impl ControlPins {
+    fn set_send(&mut self) {
+        match self {
+            Self::OnePin { ctl } => {
+                ctl.set_high().ok();
+            }
+            Self::TwoPins { de, re_n } => {
+                de.set_high().ok();
+                re_n.set_high().ok();
+            }
+        }
+    }
+
+    fn set_idle(&mut self) {
+        match self {
+            Self::OnePin { ctl } => {
+                // We can't control both. Set receive enable
+                // TODO: Verify this doesn't cause other problems
+                ctl.set_low().ok();
+            }
+            Self::TwoPins { de, re_n } => {
+                re_n.set_high().ok();
+                de.set_low().ok();
+            }
+        }
+    }
+
+    fn set_recv(&mut self) {
+        match self {
+            Self::OnePin { ctl } => {
+                ctl.set_low().ok();
+            }
+            Self::TwoPins { de, re_n } => {
+                de.set_low().ok();
+                re_n.set_low().ok();
+            }
+        }
+    }
+}
+
+struct InternalPin485 {
+    ctl: ControlPins,
+
+    dbg_1: Option<Pin<Output<PushPull>>>,
+    dbg_2: Option<Pin<Output<PushPull>>>,
 
     // Don't actually use these two! They are used by the UARTE!
     _rs_di: Pin<Output<PushPull>>,
@@ -122,12 +171,11 @@ where
         default_to: DefaultTo,
     ) -> Self {
         let pins = InternalPin485 {
-            rs_de: pins.rs_de.into_push_pull_output(Level::Low),
-            rs_re_n: pins.rs_re_n.into_push_pull_output(Level::High),
-            dbg_1: pins.dbg_1.into_push_pull_output(Level::High),
-            dbg_2: pins.dbg_2.into_push_pull_output(Level::High),
+            ctl: pins.ctl,
             _rs_di: pins.rs_di.into_push_pull_output(Level::High),
             _rs_ro: pins.rs_ro.into_floating_input(),
+            dbg_1: pins.dbg_1.map(|p| p.into_push_pull_output(Level::Low)),
+            dbg_2: pins.dbg_2.map(|p| p.into_push_pull_output(Level::Low)),
         };
 
         {
@@ -213,8 +261,7 @@ where
 
         // GPIOs
         {
-            self.pins.rs_re_n.set_high().ok();
-            self.pins.rs_de.set_high().ok();
+            self.pins.ctl.set_send();
         }
 
         // TIMERs
@@ -300,8 +347,7 @@ where
         self.uarte.intenclr.write(|w| w.endtx().set_bit());
         self.uarte.events_endtx.reset();
 
-        self.pins.rs_re_n.set_high().ok();
-        self.pins.rs_de.set_low().ok();
+        self.pins.ctl.set_idle();
 
         Ok(())
     }
@@ -327,8 +373,7 @@ where
 
         // Manage gpios
         {
-            self.pins.rs_de.set_low().ok();
-            self.pins.rs_re_n.set_low().ok();
+            self.pins.ctl.set_recv();
         }
 
         // Manage Uarte
@@ -633,24 +678,28 @@ where
 // }
 
     fn set_dbg_leds(&mut self) {
-        match self.state {
-            State485::Idle => {
-                self.pins.dbg_1.set_low().ok();
-                self.pins.dbg_2.set_low().ok();
-            },
-            State485::RxAwaitFirstByte(_) => {
-                self.pins.dbg_1.set_low().ok();
-                self.pins.dbg_2.set_high().ok();
-            },
-            State485::RxReceiving(_) => {
-                self.pins.dbg_1.set_high().ok();
-                self.pins.dbg_2.set_high().ok();
-            },
-            State485::TxSending(_) => {
-                self.pins.dbg_1.set_high().ok();
-                self.pins.dbg_2.set_low().ok();
-            },
-            State485::Invalid => { },
+        let Self { pins, state, .. } = self;
+
+        if let (Some(dbg_1), Some(dbg_2)) = (pins.dbg_1.as_mut(), pins.dbg_2.as_mut()) {
+            match state {
+                State485::Idle => {
+                    dbg_1.set_low().ok();
+                    dbg_2.set_low().ok();
+                },
+                State485::RxAwaitFirstByte(_) => {
+                    dbg_1.set_low().ok();
+                    dbg_2.set_high().ok();
+                },
+                State485::RxReceiving(_) => {
+                    dbg_1.set_high().ok();
+                    dbg_2.set_high().ok();
+                },
+                State485::TxSending(_) => {
+                    dbg_1.set_high().ok();
+                    dbg_2.set_low().ok();
+                },
+                State485::Invalid => { },
+            }
         }
     }
 }
