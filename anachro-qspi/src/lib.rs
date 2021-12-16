@@ -240,5 +240,10 @@ impl Qspi {
             }
         }).await
     }
+
+    pub fn uninit(self) {
+        self.periph.tasks_deactivate.write(|w| w.tasks_deactivate().set_bit());
+        // TODO: How to delay? This doesn't cause a ready event
+    }
 }
 
