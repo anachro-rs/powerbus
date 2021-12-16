@@ -47,15 +47,17 @@
 #![cfg_attr(not(test), no_std)]
 
 use core::{sync::atomic::Ordering, task::Poll};
-use byte_slab::ManagedArcSlab;
+pub use byte_slab::ManagedArcSlab;
 
 pub const QSPI_MAPPED_BASE_ADDRESS: usize = 0x12000000;
-pub const QSPI_MAPPED_FIRMWARE_SLOT_1: usize = QSPI_MAPPED_BASE_ADDRESS + (4 * 1024 * 1024);
-pub const QSPI_MAPPED_FIRMWARE_SLOT_2: usize = QSPI_MAPPED_BASE_ADDRESS + (5 * 1024 * 1024);
+pub const QSPI_LOCAL_FIRMWARE_SLOT_1: usize = 4 * 1024 * 1024;
+pub const QSPI_MAPPED_FIRMWARE_SLOT_1: usize = QSPI_MAPPED_BASE_ADDRESS + QSPI_LOCAL_FIRMWARE_SLOT_1;
+pub const QSPI_LOCAL_FIRMWARE_SLOT_2: usize = 5 * 1024 * 1024;
+pub const QSPI_MAPPED_FIRMWARE_SLOT_2: usize = QSPI_MAPPED_BASE_ADDRESS + QSPI_LOCAL_FIRMWARE_SLOT_2;
 
-pub struct FlashChunk<const CT: usize, const SZ: usize> {
-    addr: usize,
-    data: ManagedArcSlab<'static, CT, SZ>,
+pub struct FlashChunk<'a, const CT: usize, const SZ: usize> {
+    pub addr: usize,
+    pub data: ManagedArcSlab<'a, CT, SZ>,
 }
 
 use cassette::futures::poll_fn;
@@ -80,6 +82,7 @@ pub struct Qspi {
     periph: QSPI,
 }
 
+#[derive(defmt::Format)]
 pub enum Error {
     /// Address was not aligned properly
     Alignment,
@@ -174,6 +177,7 @@ impl Qspi {
         }
     }
 
+
     pub fn read_slice(&self, flash_addr: usize, len: usize) -> &[u8] {
         assert!(flash_addr < (16 * 1024 * 1024));
         assert!((flash_addr + len) <= (16 * 1024 * 1024));
@@ -185,7 +189,19 @@ impl Qspi {
         }
     }
 
-    pub async fn write<const CT: usize, const SZ: usize>(&mut self, data: FlashChunk<CT, SZ>) -> Result<(), Error> {
+    pub async fn read(&mut self, start: usize, dest: &mut [u8]) -> Result<(), Error> {
+        self.periph.read.dst.write(|w| unsafe { w.bits(dest.as_ptr() as u32) });
+        self.periph.read.src.write(|w| unsafe { w.bits(start as u32)});
+        self.periph.read.cnt.write(|w| unsafe { w.bits(dest.len() as u32)});
+        self.periph.events_ready.reset();
+        self.periph.tasks_readstart.write(|w| w.tasks_readstart().set_bit());
+        self.wait_done().await;
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
+
+        Ok(())
+    }
+
+    pub async fn write<'a, const CT: usize, const SZ: usize>(&mut self, data: FlashChunk<'a, CT, SZ>) -> Result<(), Error> {
         if data.data.len() != 256 {
             // For now, only handle full page writes
             return Err(Error::Alignment);
