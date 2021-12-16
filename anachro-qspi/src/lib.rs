@@ -47,8 +47,11 @@
 #![cfg_attr(not(test), no_std)]
 
 use core::{sync::atomic::Ordering, task::Poll};
-
 use byte_slab::ManagedArcSlab;
+
+pub const QSPI_MAPPED_BASE_ADDRESS: usize = 0x12000000;
+pub const QSPI_MAPPED_FIRMWARE_SLOT_1: usize = QSPI_MAPPED_BASE_ADDRESS + (4 * 1024 * 1024);
+pub const QSPI_MAPPED_FIRMWARE_SLOT_2: usize = QSPI_MAPPED_BASE_ADDRESS + (5 * 1024 * 1024);
 
 pub struct FlashChunk<const CT: usize, const SZ: usize> {
     addr: usize,
@@ -176,7 +179,7 @@ impl Qspi {
         assert!((flash_addr + len) <= (16 * 1024 * 1024));
         unsafe {
             core::slice::from_raw_parts(
-                (flash_addr + 0x12000000) as *const u8,
+                (flash_addr + QSPI_MAPPED_BASE_ADDRESS) as *const u8,
                 len
             )
         }
