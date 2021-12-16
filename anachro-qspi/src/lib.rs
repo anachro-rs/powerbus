@@ -202,17 +202,9 @@ impl Qspi {
     }
 
     pub async fn write<'a, const CT: usize, const SZ: usize>(&mut self, data: FlashChunk<'a, CT, SZ>) -> Result<(), Error> {
-        if data.data.len() != 256 {
-            // For now, only handle full page writes
-            return Err(Error::Alignment);
-        }
-        if data.addr & 0xFF != 0 {
-            return Err(Error::Alignment);
-        }
-
         self.periph.write.dst.write(|w| unsafe { w.bits(data.addr as u32)});
         self.periph.write.src.write(|w| unsafe { w.bits(data.data.as_ptr() as u32)});
-        self.periph.write.cnt.write(|w| unsafe { w.bits(256)});
+        self.periph.write.cnt.write(|w| unsafe { w.bits(data.data.len() as u32)});
         self.periph.events_ready.reset();
         core::sync::atomic::compiler_fence(Ordering::SeqCst);
         self.periph.tasks_writestart.write(|w| w.tasks_writestart().set_bit());
