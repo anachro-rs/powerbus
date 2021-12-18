@@ -135,7 +135,7 @@ impl Qspi {
             });
         }
 
-        periph.ifconfig0.modify(|_r, w| {
+        periph.ifconfig0.write(|w| {
             w.readoc().read4io();
             w.writeoc().pp4o();
             w.addrmode()._24bit();
@@ -143,7 +143,7 @@ impl Qspi {
             w.ppsize()._256bytes();
             w
         });
-        periph.ifconfig1.modify(|_r, w| {
+        periph.ifconfig1.write(|w| {
             // One 16-mhz cycle delay. As far as I can tell, we don't
             // even need this?
             unsafe { w.sckdelay().bits(1) };
@@ -155,7 +155,7 @@ impl Qspi {
         });
 
         // Enable QSPI peripheral
-        periph.enable.modify(|_r, w| w.enable().enabled());
+        periph.enable.write(|w| w.enable().enabled());
 
         // Clear the "is ready" flag
         periph.events_ready.reset();
