@@ -88,7 +88,7 @@ pub use crate::{
     slab_arc::SlabArc,
     slab_box::SlabBox,
     slab_slice_arc::{SlabSliceArc, SlabStrArc},
-    managed_arc_slab::ManagedArcSlab,
+    managed_arc_slab::{ManagedArcSlab, ManagedArcStr},
 };
 
 #[cfg(test)]
