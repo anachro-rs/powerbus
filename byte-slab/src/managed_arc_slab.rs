@@ -137,6 +137,24 @@ pub enum ManagedArcStr<'a, const N: usize, const SZ: usize> {
     Owned(SlabStrArc<N, SZ>),
 }
 
+
+impl<'a, const N: usize, const SZ: usize> PartialEq<str> for ManagedArcStr<'a, N, SZ> {
+    fn eq(&self, other: &str) -> bool {
+        let stir: &str = self.deref();
+        stir.eq(other)
+    }
+}
+
+impl<'a, const N: usize, const SZ: usize> PartialEq for ManagedArcStr<'a, N, SZ> {
+    fn eq(&self, other: &Self) -> bool {
+        let stir_me: &str = self.deref();
+        let stir_ot: &str = other.deref();
+        stir_me.eq(stir_ot)
+    }
+}
+
+impl<'a, const N: usize, const SZ: usize> Eq for ManagedArcStr<'a, N, SZ> { }
+
 impl<'a, const N: usize, const SZ: usize> defmt::Format for ManagedArcStr<'a, N, SZ> {
     fn format(&self, fmt: defmt::Formatter<'_>) {
         self.deref().format(fmt)

@@ -166,6 +166,23 @@ pub struct SlabStrArc<const N: usize, const SZ: usize> {
     pub(crate) inner: SlabSliceArc<N, SZ>,
 }
 
+impl<const N: usize, const SZ: usize> PartialEq<str> for SlabStrArc<N, SZ> {
+    fn eq(&self, other: &str) -> bool {
+        let stir: &str = self.deref();
+        stir.eq(other)
+    }
+}
+
+impl<const N: usize, const SZ: usize> PartialEq for SlabStrArc<N, SZ> {
+    fn eq(&self, other: &Self) -> bool {
+        let stir_me: &str = self.deref();
+        let stir_ot: &str = other.deref();
+        stir_me.eq(stir_ot)
+    }
+}
+
+impl<const N: usize, const SZ: usize> Eq for SlabStrArc<N, SZ> { }
+
 impl<const N: usize, const SZ: usize> Deref for SlabStrArc<N, SZ> {
     type Target = str;
 
