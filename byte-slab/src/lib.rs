@@ -87,7 +87,7 @@ pub use crate::{
     byte_slab::BSlab,
     slab_arc::SlabArc,
     slab_box::SlabBox,
-    slab_slice_arc::SlabSliceArc,
+    slab_slice_arc::{SlabSliceArc, SlabStrArc},
     managed_arc_slab::ManagedArcSlab,
 };
 
