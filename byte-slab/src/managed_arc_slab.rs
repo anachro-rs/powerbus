@@ -23,6 +23,12 @@ pub enum ManagedArcSlab<'a, const N: usize, const SZ: usize> {
     Owned(SlabSliceArc<N, SZ>),
 }
 
+impl<'a, const N: usize, const SZ: usize> defmt::Format for ManagedArcSlab<'a, N, SZ> {
+    fn format(&self, fmt: defmt::Formatter<'_>) {
+        self.deref().format(fmt)
+    }
+}
+
 impl<'a, const N: usize, const SZ: usize> Debug for ManagedArcSlab<'a, N, SZ> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // TODO: Probably want a better debug impl than this
@@ -129,6 +135,12 @@ impl<'a, const N: usize, const SZ: usize> ManagedArcSlab<'a, N, SZ> {
 pub enum ManagedArcStr<'a, const N: usize, const SZ: usize> {
     Borrowed(&'a str),
     Owned(SlabStrArc<N, SZ>),
+}
+
+impl<'a, const N: usize, const SZ: usize> defmt::Format for ManagedArcStr<'a, N, SZ> {
+    fn format(&self, fmt: defmt::Formatter<'_>) {
+        self.deref().format(fmt)
+    }
 }
 
 impl<'a, const N: usize, const SZ: usize> Debug for ManagedArcStr<'a, N, SZ> {
