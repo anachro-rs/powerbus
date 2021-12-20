@@ -261,19 +261,15 @@ impl<'a, const N: usize, const SZ: usize> ManagedArcStr<'a, N, SZ> {
 
 pub trait Reroot<const N: usize, const SZ: usize>
 {
-    type Retval: Sized;
+    type Retval;
 
-    fn reroot(self, arc: &SlabArc<N, SZ>) -> Result<Self::Retval, ()>
-    where
-        Self: Sized;
+    fn reroot(self, arc: &SlabArc<N, SZ>) -> Result<Self::Retval, ()>;
 }
 
 impl<'a, const N: usize, const SZ: usize> Reroot<N, SZ> for ManagedArcSlab<'a, N, SZ> {
     type Retval = ManagedArcSlab<'static, N, SZ>;
 
     fn reroot(self, arc: &SlabArc<N, SZ>) -> Result<Self::Retval, ()>
-    where
-        Self: Sized
     {
         self.rerooter(arc).ok_or(())
     }
@@ -282,7 +278,8 @@ impl<'a, const N: usize, const SZ: usize> Reroot<N, SZ> for ManagedArcSlab<'a, N
 impl<'a, const N: usize, const SZ: usize> Reroot<N, SZ> for ManagedArcStr<'a, N, SZ> {
     type Retval = ManagedArcStr<'static, N, SZ>;
 
-    fn reroot(self, arc: &SlabArc<N, SZ>) -> Result<Self::Retval, ()> {
+    fn reroot(self, arc: &SlabArc<N, SZ>) -> Result<Self::Retval, ()>
+    {
         self.rerooter(arc).ok_or(())
     }
 }
@@ -325,7 +322,7 @@ mod test {
         let arc_1 = sbox.into_arc();
 
         let brw = ManagedArcSlab::<4, 128>::Borrowed(&arc_1[..4]);
-        let own: ManagedArcSlab<'static, 4, 128> = brw.rerooter(&arc_1).unwrap();
+        let own: ManagedArcSlab<'static, 4, 128> = brw.reroot(&arc_1).unwrap();
 
         match own {
             ManagedArcSlab::Owned(ssa) => {
