@@ -103,7 +103,7 @@ impl<'a, const N: usize, const SZ: usize> ManagedArcSlab<'a, N, SZ> {
         ManagedArcSlab::Owned(arc.clone())
     }
 
-    pub fn rerooter_with_key(self, key: &RerooterKey) -> Option<ManagedArcSlab<'static, N, SZ>> {
+    pub fn reroot_with_key(self, key: &RerooterKey) -> Option<ManagedArcSlab<'static, N, SZ>> {
         match self {
             ManagedArcSlab::Owned(e) => Some(ManagedArcSlab::Owned(e)),
             ManagedArcSlab::Borrowed(b) => {
@@ -135,30 +135,6 @@ impl<'a, const N: usize, const SZ: usize> ManagedArcSlab<'a, N, SZ> {
                     // Okay, now forget that arc ever happened
                     core::mem::forget(arc);
 
-                    Some(ManagedArcSlab::Owned(ssa))
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
-    pub fn rerooter(self, arc: &SlabArc<N, SZ>) -> Option<ManagedArcSlab<'static, N, SZ>> {
-        match self {
-            ManagedArcSlab::Owned(e) => Some(ManagedArcSlab::Owned(e)),
-            ManagedArcSlab::Borrowed(b) => {
-                if arc.is_empty() || b.is_empty() {
-                    // TODO: nuance
-                    return None;
-                }
-
-                // TODO: yolo ub
-                let start: usize = arc.deref().as_ptr() as usize;
-                let end: usize = start + arc.deref().len();
-                let b_start: usize = b.as_ptr() as usize;
-
-                if (start <= b_start) && (b_start < end) {
-                    let ssa = arc.sub_slice_arc(b_start - start, b.len()).ok()?;
                     Some(ManagedArcSlab::Owned(ssa))
                 } else {
                     None
@@ -271,7 +247,7 @@ impl<'a, const N: usize, const SZ: usize> ManagedArcStr<'a, N, SZ> {
         ManagedArcStr::Owned(arc.clone())
     }
 
-    pub fn rerooter_with_key(self, key: &RerooterKey) -> Option<ManagedArcStr<'static, N, SZ>> {
+    pub fn reroot_with_key(self, key: &RerooterKey) -> Option<ManagedArcStr<'static, N, SZ>> {
         match self {
             ManagedArcStr::Owned(e) => Some(ManagedArcStr::Owned(e)),
             ManagedArcStr::Borrowed(b) => {
@@ -312,38 +288,16 @@ impl<'a, const N: usize, const SZ: usize> ManagedArcStr<'a, N, SZ> {
             }
         }
     }
-
-    pub fn rerooter(self, arc: &SlabArc<N, SZ>) -> Option<ManagedArcStr<'static, N, SZ>> {
-        match self {
-            ManagedArcStr::Owned(e) => Some(ManagedArcStr::Owned(e)),
-            ManagedArcStr::Borrowed(b) => {
-                if arc.is_empty() || b.is_empty() {
-                    // TODO: nuance
-                    return None;
-                }
-
-                // TODO: yolo ub
-                let start: usize = arc.deref().as_ptr() as usize;
-                let end: usize = start + arc.deref().len();
-                let b_start: usize = b.as_ptr() as usize;
-
-                if (start <= b_start) && (b_start < end) {
-                    let ssa = arc
-                        .sub_slice_arc(b_start - start, b.len())
-                        .ok()?
-                        .into_str_arc()
-                        .ok()?;
-                    Some(ManagedArcStr::Owned(ssa))
-                } else {
-                    None
-                }
-            }
-        }
-    }
 }
 
+/// A trait for restoring Managed types to a given SlabArc
+///
+/// For types that are not Managed, this trait should just return
+/// the type as-is.
 pub trait Reroot
 {
+    /// The return type. This is used to change the lifetimes, e.g. to convert
+    /// `Self: ManagedArcSlab<'a, _, _>` to `Retval: ManagedArcSlab<'static, _, _>`.
     type Retval;
 
     fn reroot(self, key: &RerooterKey) -> Result<Self::Retval, ()>;
@@ -354,7 +308,7 @@ impl<'a, const N: usize, const SZ: usize> Reroot for ManagedArcSlab<'a, N, SZ> {
 
     fn reroot(self, key: &RerooterKey) -> Result<Self::Retval, ()>
     {
-        self.rerooter_with_key(key).ok_or(())
+        self.reroot_with_key(key).ok_or(())
     }
 }
 
@@ -363,7 +317,7 @@ impl<'a, const N: usize, const SZ: usize> Reroot for ManagedArcStr<'a, N, SZ> {
 
     fn reroot(self, key: &RerooterKey) -> Result<Self::Retval, ()>
     {
-        self.rerooter_with_key(key).ok_or(())
+        self.reroot_with_key(key).ok_or(())
     }
 }
 
@@ -374,6 +328,8 @@ macro_rules! reroot_nop {
         $(
             impl Reroot for $rrty {
                 type Retval = $rrty;
+
+                #[inline(always)]
                 fn reroot(self, _key: &RerooterKey) -> Result<Self::Retval, ()>
                 {
                     Ok(self)

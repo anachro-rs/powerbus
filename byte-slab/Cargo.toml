@@ -1,6 +1,6 @@
 [package]
 name = "byte-slab"
-version = "0.1.5"
+version = "0.2.0"
 description = "A statically allocated slab of bytes"
 repository = "https://github.com/anachro-rs/powerbus"
 authors = ["James Munns <james@onevariable.com>"]

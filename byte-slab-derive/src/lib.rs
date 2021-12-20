@@ -2,8 +2,6 @@ use synstructure::{quote, BindStyle};
 use proc_macro2::{TokenStream, Ident, Span};
 use quote::ToTokens;
 
-
-
 fn reroot_derive(mut s: synstructure::Structure) -> proc_macro2::TokenStream {
     s.bind_with(|_| {
         BindStyle::Move
@@ -22,8 +20,6 @@ fn reroot_derive(mut s: synstructure::Structure) -> proc_macro2::TokenStream {
     quote!{
         #ident #gens
     }.to_tokens(&mut ret_val);
-
-    // panic!("{}", ret_val.to_string());
 
     let mut body = TokenStream::new();
 
@@ -46,6 +42,7 @@ fn reroot_derive(mut s: synstructure::Structure) -> proc_macro2::TokenStream {
 
         gen impl byte_slab::Reroot for @Self {
             type Retval = #ret_val;
+            #[inline]
             fn reroot(self, key: &byte_slab::RerooterKey) -> Result<Self::Retval, ()> {
                 match self {
                     #body
