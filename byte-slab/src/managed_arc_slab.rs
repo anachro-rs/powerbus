@@ -8,7 +8,8 @@ use core::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    slab_arc::SlabArc,
+    byte_slab::BSlab,
+    slab_arc::{SlabArc, RerooterKey},
     slab_slice_arc::{SlabSliceArc, SlabStrArc}
 };
 
@@ -100,6 +101,46 @@ impl<'a, const N: usize, const SZ: usize> ManagedArcSlab<'a, N, SZ> {
 
     pub fn from_slab_slice_arc(arc: &SlabSliceArc<N, SZ>) -> ManagedArcSlab<'static, N, SZ> {
         ManagedArcSlab::Owned(arc.clone())
+    }
+
+    pub fn rerooter_with_key(self, key: &RerooterKey) -> Option<ManagedArcSlab<'static, N, SZ>> {
+        match self {
+            ManagedArcSlab::Owned(e) => Some(ManagedArcSlab::Owned(e)),
+            ManagedArcSlab::Borrowed(b) => {
+                if b.is_empty() {
+                    // TODO: nuance
+                    return None;
+                }
+
+                // TODO: yolo ub
+                let start: usize = key.start as usize;
+                let end: usize = key.end as usize;
+                let b_start: usize = b.as_ptr() as usize;
+
+                if (start <= b_start) && (b_start < end) {
+                    let bslab: &'static BSlab<N, SZ> = unsafe { &*key.slab.cast::<BSlab<N, SZ>>() };
+
+                    // NOTE: We *don't* increase the refcount for this arc, as it technically aliases the
+                    // borrowed one that created the `key` here. Since we will forget this arc after
+                    // creating the ssa, don't update!
+                    let arc = SlabArc {
+                        slab: bslab,
+                        idx: key.idx,
+                    };
+
+                    let ssa = arc
+                        .sub_slice_arc(b_start - start, b.len())
+                        .ok()?;
+
+                    // Okay, now forget that arc ever happened
+                    core::mem::forget(arc);
+
+                    Some(ManagedArcSlab::Owned(ssa))
+                } else {
+                    None
+                }
+            }
+        }
     }
 
     pub fn rerooter(self, arc: &SlabArc<N, SZ>) -> Option<ManagedArcSlab<'static, N, SZ>> {
@@ -230,6 +271,48 @@ impl<'a, const N: usize, const SZ: usize> ManagedArcStr<'a, N, SZ> {
         ManagedArcStr::Owned(arc.clone())
     }
 
+    pub fn rerooter_with_key(self, key: &RerooterKey) -> Option<ManagedArcStr<'static, N, SZ>> {
+        match self {
+            ManagedArcStr::Owned(e) => Some(ManagedArcStr::Owned(e)),
+            ManagedArcStr::Borrowed(b) => {
+                if b.is_empty() {
+                    // TODO: nuance
+                    return None;
+                }
+
+                // TODO: yolo ub
+                let start: usize = key.start as usize;
+                let end: usize = key.end as usize;
+                let b_start: usize = b.as_ptr() as usize;
+
+                if (start <= b_start) && (b_start < end) {
+                    let bslab: &'static BSlab<N, SZ> = unsafe { &*key.slab.cast::<BSlab<N, SZ>>() };
+
+                    // NOTE: We *don't* increase the refcount for this arc, as it technically aliases the
+                    // borrowed one that created the `key` here. Since we will forget this arc after
+                    // creating the ssa, don't update!
+                    let arc = SlabArc {
+                        slab: bslab,
+                        idx: key.idx,
+                    };
+
+                    let ssa = arc
+                        .sub_slice_arc(b_start - start, b.len())
+                        .ok()?
+                        .into_str_arc()
+                        .ok()?;
+
+                    // Okay, now forget that arc ever happened
+                    core::mem::forget(arc);
+
+                    Some(ManagedArcStr::Owned(ssa))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
     pub fn rerooter(self, arc: &SlabArc<N, SZ>) -> Option<ManagedArcStr<'static, N, SZ>> {
         match self {
             ManagedArcStr::Owned(e) => Some(ManagedArcStr::Owned(e)),
@@ -259,28 +342,28 @@ impl<'a, const N: usize, const SZ: usize> ManagedArcStr<'a, N, SZ> {
     }
 }
 
-pub trait Reroot<const N: usize, const SZ: usize>
+pub trait Reroot
 {
     type Retval;
 
-    fn reroot(self, arc: &SlabArc<N, SZ>) -> Result<Self::Retval, ()>;
+    fn reroot(self, key: &RerooterKey) -> Result<Self::Retval, ()>;
 }
 
-impl<'a, const N: usize, const SZ: usize> Reroot<N, SZ> for ManagedArcSlab<'a, N, SZ> {
+impl<'a, const N: usize, const SZ: usize> Reroot for ManagedArcSlab<'a, N, SZ> {
     type Retval = ManagedArcSlab<'static, N, SZ>;
 
-    fn reroot(self, arc: &SlabArc<N, SZ>) -> Result<Self::Retval, ()>
+    fn reroot(self, key: &RerooterKey) -> Result<Self::Retval, ()>
     {
-        self.rerooter(arc).ok_or(())
+        self.rerooter_with_key(key).ok_or(())
     }
 }
 
-impl<'a, const N: usize, const SZ: usize> Reroot<N, SZ> for ManagedArcStr<'a, N, SZ> {
+impl<'a, const N: usize, const SZ: usize> Reroot for ManagedArcStr<'a, N, SZ> {
     type Retval = ManagedArcStr<'static, N, SZ>;
 
-    fn reroot(self, arc: &SlabArc<N, SZ>) -> Result<Self::Retval, ()>
+    fn reroot(self, key: &RerooterKey) -> Result<Self::Retval, ()>
     {
-        self.rerooter(arc).ok_or(())
+        self.rerooter_with_key(key).ok_or(())
     }
 }
 
@@ -289,9 +372,9 @@ macro_rules! reroot_nop {
         [$($rrty:ty),+]
     ) => {
         $(
-            impl<const N: usize, const SZ: usize> Reroot<N, SZ> for $rrty {
+            impl Reroot for $rrty {
                 type Retval = $rrty;
-                fn reroot(self, _arc: &SlabArc<N, SZ>) -> Result<Self::Retval, ()>
+                fn reroot(self, _key: &RerooterKey) -> Result<Self::Retval, ()>
                 {
                     Ok(self)
                 }

@@ -32,7 +32,7 @@ fn reroot_derive(mut s: synstructure::Structure) -> proc_macro2::TokenStream {
         let cons = var.construct(|_field, i| {
             let binding = var.bindings().iter().nth(i).unwrap();
             quote!{
-                byte_slab::Reroot::<N, SZ>::reroot(#binding, arc)?
+                #binding.reroot(key)?
             }
         });
 
@@ -44,9 +44,9 @@ fn reroot_derive(mut s: synstructure::Structure) -> proc_macro2::TokenStream {
     s.gen_impl(quote! {
         extern crate byte_slab;
 
-        gen impl<const N: usize, const SZ: usize> byte_slab::Reroot<N, SZ> for @Self {
+        gen impl byte_slab::Reroot for @Self {
             type Retval = #ret_val;
-            fn reroot(self, arc: &byte_slab::SlabArc<N, SZ>) -> Result<Self::Retval, ()> {
+            fn reroot(self, key: &byte_slab::RerooterKey) -> Result<Self::Retval, ()> {
                 match self {
                     #body
                 }

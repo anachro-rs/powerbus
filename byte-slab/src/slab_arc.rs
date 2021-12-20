@@ -11,6 +11,7 @@ use core::{
     ops::Deref,
     sync::atomic::Ordering,
 };
+use core::marker::PhantomData;
 
 use crate::byte_slab::BSlab;
 
@@ -60,6 +61,14 @@ pub struct SlabArc<const N: usize, const SZ: usize> {
     pub(crate) idx: usize,
 }
 
+pub struct RerooterKey<'a> {
+    pub(crate) start: *const u8,
+    pub(crate) end: *const u8,
+    pub(crate) pdlt: PhantomData<&'a ()>,
+    pub(crate) slab: *const (),
+    pub(crate) idx: usize,
+}
+
 impl<const N: usize, const SZ: usize> SlabArc<N, SZ> {
     /// Create a `SlabSliceArc` from this `SlabArc`, with a full view
     /// of the underlying data
@@ -68,6 +77,18 @@ impl<const N: usize, const SZ: usize> SlabArc<N, SZ> {
             arc: self.clone(),
             start: 0,
             len: self.len(),
+        }
+    }
+
+    pub fn rerooter_key<'a>(&'a self) -> RerooterKey<'a> {
+        let slice = self.deref();
+
+        RerooterKey {
+            start: slice.as_ptr(),
+            end: unsafe { slice.as_ptr().add(slice.len()) },
+            pdlt: PhantomData,
+            slab: (self.slab as *const BSlab<N, SZ>).cast(),
+            idx: self.idx,
         }
     }
 
