@@ -102,7 +102,7 @@ impl<'a, const N: usize, const SZ: usize> ManagedArcSlab<'a, N, SZ> {
         ManagedArcSlab::Owned(arc.clone())
     }
 
-    pub fn reroot(self, arc: &SlabArc<N, SZ>) -> Option<ManagedArcSlab<'static, N, SZ>> {
+    pub fn rerooter(self, arc: &SlabArc<N, SZ>) -> Option<ManagedArcSlab<'static, N, SZ>> {
         match self {
             ManagedArcSlab::Owned(e) => Some(ManagedArcSlab::Owned(e)),
             ManagedArcSlab::Borrowed(b) => {
@@ -230,7 +230,7 @@ impl<'a, const N: usize, const SZ: usize> ManagedArcStr<'a, N, SZ> {
         ManagedArcStr::Owned(arc.clone())
     }
 
-    pub fn reroot(self, arc: &SlabArc<N, SZ>) -> Option<ManagedArcStr<'static, N, SZ>> {
+    pub fn rerooter(self, arc: &SlabArc<N, SZ>) -> Option<ManagedArcStr<'static, N, SZ>> {
         match self {
             ManagedArcStr::Owned(e) => Some(ManagedArcStr::Owned(e)),
             ManagedArcStr::Borrowed(b) => {
@@ -257,4 +257,82 @@ impl<'a, const N: usize, const SZ: usize> ManagedArcStr<'a, N, SZ> {
             }
         }
     }
+}
+
+pub trait Reroot<const N: usize, const SZ: usize>
+{
+    type Retval: Sized;
+
+    fn reroot(self, arc: &SlabArc<N, SZ>) -> Result<Self::Retval, ()>
+    where
+        Self: Sized;
+}
+
+impl<'a, const N: usize, const SZ: usize> Reroot<N, SZ> for ManagedArcSlab<'a, N, SZ> {
+    type Retval = ManagedArcSlab<'static, N, SZ>;
+
+    fn reroot(self, arc: &SlabArc<N, SZ>) -> Result<Self::Retval, ()>
+    where
+        Self: Sized
+    {
+        self.rerooter(arc).ok_or(())
+    }
+}
+
+impl<'a, const N: usize, const SZ: usize> Reroot<N, SZ> for ManagedArcStr<'a, N, SZ> {
+    type Retval = ManagedArcStr<'static, N, SZ>;
+
+    fn reroot(self, arc: &SlabArc<N, SZ>) -> Result<Self::Retval, ()> {
+        self.rerooter(arc).ok_or(())
+    }
+}
+
+macro_rules! reroot_nop {
+    (
+        [$($rrty:ty),+]
+    ) => {
+        $(
+            impl<const N: usize, const SZ: usize> Reroot<N, SZ> for $rrty {
+                type Retval = $rrty;
+                fn reroot(self, _arc: &SlabArc<N, SZ>) -> Result<Self::Retval, ()>
+                {
+                    Ok(self)
+                }
+            }
+        )+
+    };
+}
+
+reroot_nop!([u8, u16, u32, u64]);
+reroot_nop!([i8, i16, i32, i64]);
+reroot_nop!([bool, char, ()]);
+reroot_nop!([f32, f64]);
+
+#[cfg(test)]
+mod test {
+    use crate::{BSlab, ManagedArcSlab, Reroot};
+    use std::ops::Deref;
+
+    #[test]
+    fn smoke() {
+        static SLAB: BSlab<4, 128> = BSlab::new();
+        SLAB.init().unwrap();
+
+        let mut sbox = SLAB.alloc_box().unwrap();
+
+        sbox[..4].copy_from_slice(&[1, 2, 3, 4]);
+
+        let arc_1 = sbox.into_arc();
+
+        let brw = ManagedArcSlab::<4, 128>::Borrowed(&arc_1[..4]);
+        let own: ManagedArcSlab<'static, 4, 128> = brw.rerooter(&arc_1).unwrap();
+
+        match own {
+            ManagedArcSlab::Owned(ssa) => {
+                assert_eq!(&[1, 2, 3, 4], ssa.deref());
+            }
+            _ => panic!("Not owned!"),
+        }
+    }
+
 }
