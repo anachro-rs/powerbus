@@ -346,6 +346,36 @@ reroot_nop!([i8, i16, i32, i64]);
 reroot_nop!([bool, char, ()]);
 reroot_nop!([f32, f64]);
 
+impl<T, E> Reroot for Result<T, E>
+where
+    T: Reroot,
+    E: Reroot,
+{
+    type Retval = Result<T::Retval, E::Retval>;
+
+    fn reroot(self, key: &RerooterKey) -> Result<Result<T::Retval, E::Retval>, ()> {
+        match self {
+            Ok(t) => Ok(Ok(t.reroot(key)?)),
+            Err(e) => Ok(Err(e.reroot(key)?)),
+        }
+    }
+}
+
+impl<T> Reroot for Option<T>
+where
+    T: Reroot,
+{
+    type Retval = Option<T::Retval>;
+
+    #[inline]
+    fn reroot(self, key: &RerooterKey) -> Result<Self::Retval, ()> {
+        match self {
+            Some(t) => Ok(Some(t.reroot(key)?)),
+            None => Ok(None),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::{BSlab, ManagedArcSlab, Reroot};

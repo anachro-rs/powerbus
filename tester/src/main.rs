@@ -32,9 +32,13 @@ struct DemoComboS<'a> {
 #[derive(Reroot)]
 struct DemoComboSConst<'a, T, const N: usize, const SZ: usize>
 where
-    T: Reroot<Retval = T> + 'static
+    T: Reroot<Retval = T> + 'static,
+    Result<T, u8>: Reroot<Retval = Result<T::Retval, u8>> + 'static,
+    Option<T>: Reroot<Retval = Option<T::Retval>> + 'static,
 {
     foo: u8,
     bar: ManagedArcSlab<'a, N, SZ>,
     baz: T,
+    bib: Result<T, u8>,
+    bim: Option<T>,
 }
