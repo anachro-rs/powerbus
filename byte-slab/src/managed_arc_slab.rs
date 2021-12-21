@@ -24,6 +24,7 @@ pub enum ManagedArcSlab<'a, const N: usize, const SZ: usize> {
     Owned(SlabSliceArc<N, SZ>),
 }
 
+#[cfg(feature = "defmt")]
 impl<'a, const N: usize, const SZ: usize> defmt::Format for ManagedArcSlab<'a, N, SZ> {
     fn format(&self, fmt: defmt::Formatter<'_>) {
         self.deref().format(fmt)
@@ -172,6 +173,7 @@ impl<'a, const N: usize, const SZ: usize> PartialEq for ManagedArcStr<'a, N, SZ>
 
 impl<'a, const N: usize, const SZ: usize> Eq for ManagedArcStr<'a, N, SZ> { }
 
+#[cfg(feature = "defmt")]
 impl<'a, const N: usize, const SZ: usize> defmt::Format for ManagedArcStr<'a, N, SZ> {
     fn format(&self, fmt: defmt::Formatter<'_>) {
         self.deref().format(fmt)
