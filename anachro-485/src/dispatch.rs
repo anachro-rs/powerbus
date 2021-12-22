@@ -9,7 +9,7 @@ use core::{
     sync::atomic::{AtomicBool, AtomicU16, AtomicU8, Ordering::SeqCst},
 };
 
-use byte_slab::{BSlab, ManagedArcSlab, SlabBox};
+use byte_slab::{BSlab, ManagedArcSlab, SlabBox, Reroot};
 use cobs::decode_in_place;
 use heapless::mpmc::MpMcQueue;
 use postcard::{from_bytes, to_slice, to_slice_cobs};
@@ -375,6 +375,8 @@ impl<const PORTS: usize> Dispatch<PORTS> {
             .find(|pq| pq.port.load(SeqCst) == lm.hdr.dst.port)
             .ok_or(ProcessMessageError::DestPort)?;
 
+        let rrkey = arc.rerooter_key();
+
         // Ship it!
         pq.to_task
             .enqueue(LocalPacket {
@@ -383,7 +385,7 @@ impl<const PORTS: usize> Dispatch<PORTS> {
                     dst: lm.hdr.dst,
                     tick: time,
                 },
-                payload: lm.msg.reroot(&arc).ok_or(ProcessMessageError::ReRoot)?,
+                payload: lm.msg.reroot(&rrkey).map_err(|_| ProcessMessageError::ReRoot)?,
                 response_wait_ticks: None,
             })
             .map_err(|_| ProcessMessageError::TaskQueueFull)

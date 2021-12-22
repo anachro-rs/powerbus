@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-byte-slab = "0.1.1"
+byte-slab = "0.2"
 nrf52840-hal = "0.14.0"
 cassette = "0.2.3"
 defmt = "0.3.0"
