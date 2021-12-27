@@ -46,7 +46,7 @@
 
 #![cfg_attr(not(test), no_std)]
 
-use core::{sync::atomic::Ordering, task::Poll};
+use core::{sync::atomic::Ordering, task::Poll, ops::Deref};
 pub use byte_slab::ManagedArcSlab;
 
 pub const QSPI_MAPPED_BASE_ADDRESS: usize = 0x12000000;
@@ -203,7 +203,7 @@ impl Qspi {
 
     pub async fn write<'a, const CT: usize, const SZ: usize>(&mut self, data: FlashChunk<'a, CT, SZ>) -> Result<(), Error> {
         self.periph.write.dst.write(|w| unsafe { w.bits(data.addr as u32)});
-        self.periph.write.src.write(|w| unsafe { w.bits(data.data.as_ptr() as u32)});
+        self.periph.write.src.write(|w| unsafe { w.bits(data.data.deref().as_ptr() as u32)});
         self.periph.write.cnt.write(|w| unsafe { w.bits(data.data.len() as u32)});
         self.periph.events_ready.reset();
         core::sync::atomic::compiler_fence(Ordering::SeqCst);

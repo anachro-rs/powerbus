@@ -20,4 +20,6 @@ version = "1.0.130"
 features = ["derive"]
 
 [dependencies.anachro-boot]
-path = "../anachro-boot"
+# TODO: This only works for the private `powerbus-mini` project!
+# Move bootloader definitions to a public crate in the `powerbus` repo!
+path = "../../../bootloader"
