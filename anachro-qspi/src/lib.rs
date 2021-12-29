@@ -90,6 +90,14 @@ pub enum Error {
 
 impl Qspi {
     pub fn new(periph: QSPI, pins: QspiPins) -> Self {
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
+        periph.enable.write(|w| w.enable().disabled());
+        // 0x40029054ul
+        unsafe {
+            (0x40029054u32 as *mut u32).write_volatile(0x0000_0001);
+        }
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
+
         let pinarr = &[
             &pins.qspi_copi_io0,
             &pins.qspi_cipo_io1,
@@ -178,23 +186,34 @@ impl Qspi {
     }
 
 
-    pub fn read_slice(&self, flash_addr: usize, len: usize) -> &[u8] {
-        assert!(flash_addr < (16 * 1024 * 1024));
-        assert!((flash_addr + len) <= (16 * 1024 * 1024));
-        unsafe {
+    pub fn read_slice(&self, flash_addr: usize, len: usize) -> Result<&[u8], u32> {
+        if !(flash_addr < (16 * 1024 * 1024)) {
+            return Err(flash_addr as u32);
+        }
+        if !(flash_addr + len) <= (16 * 1024 * 1024) {
+            return Err((flash_addr + len + 1) as u32);
+        }
+
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
+        Ok(unsafe {
             core::slice::from_raw_parts(
                 (flash_addr + QSPI_MAPPED_BASE_ADDRESS) as *const u8,
                 len
             )
-        }
+        })
     }
 
     pub async fn read(&mut self, start: usize, dest: &mut [u8]) -> Result<(), Error> {
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
+
         self.periph.read.dst.write(|w| unsafe { w.bits(dest.as_ptr() as u32) });
         self.periph.read.src.write(|w| unsafe { w.bits(start as u32)});
         self.periph.read.cnt.write(|w| unsafe { w.bits(dest.len() as u32)});
+
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
         self.periph.events_ready.reset();
         self.periph.tasks_readstart.write(|w| w.tasks_readstart().set_bit());
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
         self.wait_done().await;
         core::sync::atomic::compiler_fence(Ordering::SeqCst);
 
@@ -202,19 +221,27 @@ impl Qspi {
     }
 
     pub async fn write<'a, const CT: usize, const SZ: usize>(&mut self, data: FlashChunk<'a, CT, SZ>) -> Result<(), Error> {
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
+
         self.periph.write.dst.write(|w| unsafe { w.bits(data.addr as u32)});
         self.periph.write.src.write(|w| unsafe { w.bits(data.data.deref().as_ptr() as u32)});
         self.periph.write.cnt.write(|w| unsafe { w.bits(data.data.len() as u32)});
-        self.periph.events_ready.reset();
-        core::sync::atomic::compiler_fence(Ordering::SeqCst);
-        self.periph.tasks_writestart.write(|w| w.tasks_writestart().set_bit());
 
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
+        self.periph.events_ready.reset();
+        self.periph.tasks_writestart.write(|w| w.tasks_writestart().set_bit());
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
         self.wait_done().await;
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
+
+        drop(data);
 
         Ok(())
     }
 
     pub async fn erase(&mut self, start: usize, len: EraseLength) -> Result<(), Error> {
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
+
         // Ensure alignment to page size
         match len {
             EraseLength::_4KB if start & 0xFFF != 0 => return Err(Error::Alignment),
@@ -225,10 +252,15 @@ impl Qspi {
 
         self.periph.erase.ptr.write(|w| unsafe { w.bits(start as u32) });
         self.periph.erase.len.write(|w| w.len().variant(len) );
+
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
         self.periph.events_ready.reset();
         self.periph.tasks_erasestart.write(|w| w.tasks_erasestart().set_bit());
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
+        self.wait_done().await;
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
 
-        Ok(self.wait_done().await)
+        Ok(())
     }
 
     pub async fn wait_done(&self) {
@@ -242,7 +274,13 @@ impl Qspi {
     }
 
     pub fn uninit(self) {
-        self.periph.tasks_deactivate.write(|w| w.tasks_deactivate().set_bit());
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
+        // self.periph.tasks_deactivate.write(|w| w.tasks_deactivate().set_bit());
+        self.periph.enable.write(|w| w.enable().disabled());
+        unsafe {
+            (0x40029054u32 as *mut u32).write_volatile(0x0000_0001);
+        }
+        core::sync::atomic::compiler_fence(Ordering::SeqCst);
         // TODO: How to delay? This doesn't cause a ready event
     }
 }
