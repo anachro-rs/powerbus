@@ -143,9 +143,17 @@ impl Qspi {
             });
         }
 
+        // periph.ifconfig0.write(|w| {
+        //     w.readoc().read4io();
+        //     w.writeoc().pp4o();
+        //     w.addrmode()._24bit();
+        //     w.dpmenable().disable();
+        //     w.ppsize()._256bytes();
+        //     w
+        // });
         periph.ifconfig0.write(|w| {
-            w.readoc().read4io();
-            w.writeoc().pp4o();
+            w.readoc().fastread();
+            w.writeoc().pp();
             w.addrmode()._24bit();
             w.dpmenable().disable();
             w.ppsize()._256bytes();
@@ -158,7 +166,7 @@ impl Qspi {
             w.dpmen().exit();
             w.spimode().mode0();
             // SPI freqency of 32mhz
-            unsafe { w.sckfreq().bits(0) };
+            unsafe { w.sckfreq().bits(15) };
             w
         });
 
