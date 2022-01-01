@@ -200,7 +200,7 @@ pub struct Dispatch<const PORTS: usize> {
     ports: [PortQueue; PORTS],
     ioq: &'static IoQueue,
     own_addr: AtomicU8,
-    shame: MpMcQueue<OutgoingSlab, 1>,
+    shame: MpMcQueue<OutgoingSlab, 2>,
     alloc: &'static AllocSlab,
     // TODO: link to another Dispatch for forwarding
 }

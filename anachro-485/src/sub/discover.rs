@@ -1,6 +1,7 @@
 use core::marker::PhantomData;
 
 use byte_slab::BSlab;
+use cassette::yield_now;
 use groundhog::RollingTimer;
 use rand::Rng;
 
@@ -44,13 +45,12 @@ where
         }
     }
 
-    pub async fn obtain_addr(&mut self) -> Result<u8, ()> {
+    pub async fn obtain_addr(&mut self) -> Result<(), ()> {
         loop {
-            if let Some(addr) = self.obtain_addr_inner().await? {
-                // println!("Addr obtained! {}", addr);
-                return Ok(addr);
+            if let Some(_) = self.dispatch.get_addr() {
+                yield_now().await;
             } else {
-                // println!("Sub poll good, still working...");
+                self.obtain_addr_inner().await?;
             }
         }
     }
