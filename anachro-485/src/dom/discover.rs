@@ -1,6 +1,7 @@
 use crate::{
     async_sleep_millis,
     dispatch::{DispatchSocket, LocalPacket},
+    dom::{AddrTable32, DISCOVERY_PORT},
     icd::{AddrPort, DomDiscoveryPayload, SubDiscoveryPayload, VecAddr, SLAB_SIZE, TOTAL_SLABS},
     receive_timeout_micros,
     timing::{
@@ -15,10 +16,6 @@ use byte_slab::BSlab;
 use groundhog::RollingTimer;
 use heapless::{FnvIndexMap, FnvIndexSet, Vec};
 use rand::Rng;
-
-use crate::dom::AddrTable32;
-
-use super::DISCOVERY_PORT;
 
 pub struct Discovery<R, A>
 where

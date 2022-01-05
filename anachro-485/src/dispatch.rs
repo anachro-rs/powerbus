@@ -52,6 +52,26 @@ pub enum AwakeIoHandler {
 }
 
 impl LocalPacket {
+    pub fn from_hdr_payload(hdr: LocalHeader, payload: MASlab) -> Self {
+        Self {
+            hdr,
+            payload,
+            response_wait_ticks: None,
+        }
+    }
+
+    pub fn header(&self) -> &LocalHeader {
+        &self.hdr
+    }
+
+    pub fn payload(&self) -> &[u8] {
+        self.payload.deref()
+    }
+
+    pub fn payload_slab(&self) -> &MASlab {
+        &self.payload
+    }
+
     pub fn from_parts_with_alloc<T: Serialize>(
         msg: T,
         src: AddrPort,

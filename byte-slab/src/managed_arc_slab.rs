@@ -92,6 +92,13 @@ impl<'a, const N: usize, const SZ: usize> Deref for ManagedArcSlab<'a, N, SZ> {
 }
 
 impl<'a, const N: usize, const SZ: usize> ManagedArcSlab<'a, N, SZ> {
+    pub fn summon_arc(&self) -> Option<SlabArc<N, SZ>> {
+        match self {
+            ManagedArcSlab::Borrowed(_) => None,
+            ManagedArcSlab::Owned(ssa) => Some(ssa.arc.clone()),
+        }
+    }
+
     pub fn from_arc(arc: &SlabArc<N, SZ>) -> ManagedArcSlab<'static, N, SZ> {
         ManagedArcSlab::Owned(arc.full_sub_slice_arc())
     }

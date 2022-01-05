@@ -19,8 +19,8 @@ pub const LOCAL_ADDR_LEN: usize = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct AddrPort {
-    pub(crate) addr: VecAddr,
-    pub(crate) port: u16,
+    pub addr: VecAddr,
+    pub port: u16,
 }
 
 impl AddrPort {
